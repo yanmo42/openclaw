@@ -146,6 +146,8 @@ describe("plugin registry channel guard", () => {
         origin,
         enabled: true,
       });
+      record.version = "1.2.3";
+      record.candidateVersion = "2026.7.2";
 
       pluginRegistry.registry.plugins.push(record);
       pluginRegistry
@@ -157,12 +159,16 @@ describe("plugin registry channel guard", () => {
       expect(pluginRegistry.registry.channels).toEqual([
         expect.objectContaining({
           pluginId: `${origin}-channel-owner`,
+          pluginVersion: "1.2.3",
+          pluginCandidateVersion: "2026.7.2",
           origin,
         }),
       ]);
       expect(pluginRegistry.registry.channelSetups).toEqual([
         expect.objectContaining({
           pluginId: `${origin}-channel-owner`,
+          pluginVersion: "1.2.3",
+          pluginCandidateVersion: "2026.7.2",
           origin,
         }),
       ]);

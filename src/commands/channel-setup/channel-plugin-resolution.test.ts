@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChannelPluginCatalogEntry } from "../../channels/plugins/catalog.js";
 import type { ChannelPlugin } from "../../channels/plugins/types.public.js";
+import { resolveChannelPluginCandidateFingerprint } from "../../plugins/channel-candidate-fingerprint.js";
 
 const mocks = vi.hoisted(() => ({
   resolveAgentWorkspaceDir: vi.fn(() => "/tmp/workspace"),
@@ -9,6 +10,16 @@ const mocks = vi.hoisted(() => ({
   listChannelPluginCatalogEntries: vi.fn(),
   getChannelPluginCatalogEntry: vi.fn(),
   getChannelPlugin: vi.fn(),
+  getLoadedChannelPluginCandidateFingerprint: vi.fn(),
+  getLoadedChannelPluginOrigin: vi.fn(),
+  getLoadedChannelPluginOwnerId: vi.fn(),
+  normalizeChannelId: vi.fn((value: unknown) => {
+    if (typeof value !== "string") {
+      return null;
+    }
+    const normalized = value.trim();
+    return normalized === "teams" ? "msteams" : normalized || null;
+  }),
   loadChannelSetupPluginRegistrySnapshotForChannel: vi.fn(),
   ensureChannelSetupPluginInstalled: vi.fn(),
   createClackPrompter: vi.fn(() => ({}) as never),
@@ -26,13 +37,10 @@ vi.mock("../../channels/plugins/catalog.js", () => ({
 
 vi.mock("../../channels/plugins/index.js", () => ({
   getChannelPlugin: mocks.getChannelPlugin,
-  normalizeChannelId: (value: unknown) => {
-    if (typeof value !== "string") {
-      return null;
-    }
-    const normalized = value.trim();
-    return normalized === "teams" ? "msteams" : normalized || null;
-  },
+  getLoadedChannelPluginCandidateFingerprint: mocks.getLoadedChannelPluginCandidateFingerprint,
+  getLoadedChannelPluginOrigin: mocks.getLoadedChannelPluginOrigin,
+  getLoadedChannelPluginOwnerId: mocks.getLoadedChannelPluginOwnerId,
+  normalizeChannelId: mocks.normalizeChannelId,
 }));
 
 vi.mock("./plugin-install.js", () => ({
@@ -51,6 +59,7 @@ function createCatalogEntry(params: {
   id: string;
   pluginId: string;
   origin?: "workspace" | "bundled";
+  aliases?: string[];
 }): ChannelPluginCatalogEntry {
   return {
     id: params.id,
@@ -62,6 +71,7 @@ function createCatalogEntry(params: {
       selectionLabel: "Telegram",
       docsPath: "/channels/telegram",
       blurb: "Telegram channel",
+      ...(params.aliases ? { aliases: params.aliases } : {}),
     },
     install: {
       npmSpec: params.pluginId,
@@ -85,7 +95,17 @@ describe("resolveInstallableChannelPlugin", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getChannelPlugin.mockReturnValue(undefined);
+    mocks.getLoadedChannelPluginCandidateFingerprint.mockReturnValue(undefined);
+    mocks.getLoadedChannelPluginOrigin.mockReturnValue(undefined);
+    mocks.getLoadedChannelPluginOwnerId.mockReturnValue(undefined);
     mocks.getChannelPluginCatalogEntry.mockReturnValue(undefined);
+    mocks.normalizeChannelId.mockImplementation((value: unknown) => {
+      if (typeof value !== "string") {
+        return null;
+      }
+      const normalized = value.trim();
+      return normalized === "teams" ? "msteams" : normalized || null;
+    });
     mocks.ensureChannelSetupPluginInstalled.mockResolvedValue({
       cfg: {},
       installed: false,
@@ -200,11 +220,126 @@ describe("resolveInstallableChannelPlugin", () => {
       },
       runtime: {} as never,
       rawChannel: "teams",
+      channelId: "msteams",
       allowInstall: false,
     });
 
     expect(result.channelId).toBe("teams");
     expect(result.plugin).toBe(plugin);
+  });
+
+  it("fingerprints a scoped plugin with its candidate-stable package version", async () => {
+    const catalogEntry = createCatalogEntry({
+      id: "teams",
+      pluginId: "@vendor/teams",
+      origin: "workspace",
+    });
+    const plugin = createPlugin("teams");
+    mocks.listChannelPluginCatalogEntries.mockReturnValue([catalogEntry]);
+    mocks.loadChannelSetupPluginRegistrySnapshotForChannel.mockReturnValue({
+      channels: [
+        {
+          plugin,
+          pluginId: "@vendor/teams",
+          origin: "workspace",
+          source: "/plugins/teams/index.js",
+          rootDir: "/plugins/teams",
+          pluginVersion: "manifest-version",
+          pluginCandidateVersion: "package-version",
+        },
+      ],
+      channelSetups: [],
+    });
+
+    const result = await resolveInstallableChannelPlugin({
+      cfg: {
+        plugins: {
+          enabled: true,
+          allow: ["@vendor/teams"],
+        },
+      },
+      runtime: {} as never,
+      rawChannel: "teams",
+      allowInstall: false,
+    });
+
+    expect(result.pluginCandidateFingerprint).toBe(
+      resolveChannelPluginCandidateFingerprint({
+        pluginId: "@vendor/teams",
+        origin: "workspace",
+        source: "/plugins/teams/index.js",
+        rootDir: "/plugins/teams",
+        version: "package-version",
+      }),
+    );
+  });
+
+  it("keeps an exact loaded id when another catalog entry claims it as an alias", async () => {
+    const aliasOwner = createCatalogEntry({
+      id: "msteams",
+      pluginId: "@openclaw/msteams",
+      origin: "bundled",
+      aliases: ["teams"],
+    });
+    const exactPlugin = createPlugin("teams");
+    mocks.listChannelPluginCatalogEntries.mockReturnValue([aliasOwner]);
+    mocks.getChannelPlugin.mockReturnValue(exactPlugin);
+    mocks.getLoadedChannelPluginOwnerId.mockReturnValue("teams-workspace");
+    mocks.normalizeChannelId.mockReturnValue("teams");
+
+    const result = await resolveInstallableChannelPlugin({
+      cfg: { plugins: { enabled: true } },
+      runtime: {} as never,
+      rawChannel: "teams",
+      channelId: "teams",
+      allowInstall: false,
+    });
+
+    expect(result.channelId).toBe("teams");
+    expect(result.plugin).toBe(exactPlugin);
+    expect(result.pluginId).toBe("teams-workspace");
+    expect(result.catalogEntry).toBeUndefined();
+  });
+
+  it("returns the exact loaded plugin candidate fingerprint", async () => {
+    const plugin = createPlugin("teams");
+    mocks.getChannelPlugin.mockReturnValue(plugin);
+    mocks.getLoadedChannelPluginCandidateFingerprint.mockReturnValue("candidate-fingerprint");
+    mocks.normalizeChannelId.mockReturnValue("teams");
+
+    const result = await resolveInstallableChannelPlugin({
+      cfg: { plugins: { enabled: true } },
+      runtime: {} as never,
+      rawChannel: "teams",
+      allowInstall: false,
+    });
+
+    expect(result.plugin).toBe(plugin);
+    expect(result.pluginCandidateFingerprint).toBe("candidate-fingerprint");
+  });
+
+  it("derives an exact loaded id before resolving a raw-only catalog alias", async () => {
+    const aliasOwner = createCatalogEntry({
+      id: "msteams",
+      pluginId: "@openclaw/msteams",
+      origin: "bundled",
+      aliases: ["teams"],
+    });
+    const exactPlugin = createPlugin("teams");
+    mocks.listChannelPluginCatalogEntries.mockReturnValue([aliasOwner]);
+    mocks.getChannelPlugin.mockReturnValue(exactPlugin);
+    mocks.normalizeChannelId.mockReturnValue("teams");
+
+    const result = await resolveInstallableChannelPlugin({
+      cfg: { plugins: { enabled: true } },
+      runtime: {} as never,
+      rawChannel: "teams",
+      allowInstall: false,
+    });
+
+    expect(result.channelId).toBe("teams");
+    expect(result.plugin).toBe(exactPlugin);
+    expect(result.catalogEntry).toBeUndefined();
   });
 
   it("returns an existing plugin that lacks the requested capability without reinstalling", async () => {

@@ -2,7 +2,10 @@
 // prompter) and the gateway `wizard.start {flow:"channels"}` RPC (session
 // prompter driving the Control UI / native clients).
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../../agents/agent-scope.js";
-import { findChannelEntryByIdOrAlias } from "../../channels/plugins/entry-resolution.js";
+import {
+  channelEntryHasExactId,
+  findChannelEntryByIdOrAlias,
+} from "../../channels/plugins/entry-resolution.js";
 import { getLoadedChannelPlugin } from "../../channels/plugins/index.js";
 import type { ChannelSetupPlugin } from "../../channels/plugins/setup-wizard-types.js";
 import { readConfigFileSnapshot, type OpenClawConfig } from "../../config/config.js";
@@ -26,14 +29,28 @@ export async function resolveInitialWizardChannel(
   raw: string,
   cfg: OpenClawConfig,
 ): Promise<ChannelChoice | undefined> {
-  const [{ listActiveChannelSetupPlugins }, { resolveChannelSetupEntries }] = await Promise.all([
+  const [
+    { listActiveChannelSetupPlugins },
+    { resolveChannelSetupEntries, shouldShowChannelInSetup },
+    { listTrustedChannelPluginCatalogEntries },
+  ] = await Promise.all([
     import("../../channels/plugins/setup-registry.js"),
     import("../channel-setup/discovery.js"),
+    import("../channel-setup/trusted-catalog.js"),
   ]);
+  const workspaceDir = resolveAgentWorkspaceDir(cfg, resolveDefaultAgentId(cfg));
+  const exactCatalogEntry = listTrustedChannelPluginCatalogEntries({ cfg, workspaceDir }).find(
+    (entry) => channelEntryHasExactId(entry, raw),
+  );
+  if (exactCatalogEntry) {
+    return shouldShowChannelInSetup(exactCatalogEntry.meta)
+      ? (exactCatalogEntry.id as ChannelChoice)
+      : undefined;
+  }
   const resolved = resolveChannelSetupEntries({
     cfg,
     installedPlugins: listActiveChannelSetupPlugins(),
-    workspaceDir: resolveAgentWorkspaceDir(cfg, resolveDefaultAgentId(cfg)),
+    workspaceDir,
   });
   return findChannelEntryByIdOrAlias(resolved.entries, raw)?.id;
 }

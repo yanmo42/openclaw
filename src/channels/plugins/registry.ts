@@ -4,6 +4,7 @@
  * Lists, resolves, and normalizes active channel plugins with bundled fallback.
  */
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { resolveChannelPluginCandidateFingerprint } from "../../plugins/channel-candidate-fingerprint.js";
 import { normalizeAnyChannelId } from "../registry.js";
 import { getBundledChannelPlugin } from "./bundled.js";
 import {
@@ -41,6 +42,36 @@ export function getLoadedChannelPluginOrigin(id: ChannelId): string | undefined 
     return undefined;
   }
   return normalizeOptionalString(getLoadedChannelPluginEntryById(resolvedId)?.origin) ?? undefined;
+}
+
+/** Returns the plugin manifest id that owns one loaded channel runtime. */
+export function getLoadedChannelPluginOwnerId(id: ChannelId): string | undefined {
+  const resolvedId = normalizeOptionalString(id) ?? "";
+  if (!resolvedId) {
+    return undefined;
+  }
+  return (
+    normalizeOptionalString(getLoadedChannelPluginEntryById(resolvedId)?.pluginId) ?? undefined
+  );
+}
+
+/** Returns the opaque loader candidate identity for one loaded channel runtime. */
+export function getLoadedChannelPluginCandidateFingerprint(id: ChannelId): string | undefined {
+  const resolvedId = normalizeOptionalString(id) ?? "";
+  if (!resolvedId) {
+    return undefined;
+  }
+  const entry = getLoadedChannelPluginEntryById(resolvedId);
+  if (!entry) {
+    return undefined;
+  }
+  return resolveChannelPluginCandidateFingerprint({
+    pluginId: entry.pluginId,
+    origin: entry.origin,
+    source: entry.source,
+    rootDir: entry.rootDir,
+    version: entry.pluginCandidateVersion,
+  });
 }
 
 /**

@@ -9,6 +9,10 @@ import {
 } from "../../packages/gateway-protocol/src/client-info.js";
 import { listBundledChannelCatalogEntries } from "../channels/bundled-channel-catalog-read.js";
 import { findChatChannelMeta } from "../channels/chat-meta.js";
+import {
+  hasKnownChannelPluginOwnerOtherThan,
+  resolveKnownChannelPluginId,
+} from "../channels/registry-lookup.js";
 import { getRegisteredChannelPluginMeta, normalizeChatChannelId } from "../channels/registry.js";
 export {
   isDeliverableMessageChannel,
@@ -122,8 +126,21 @@ export function isMarkdownCapableMessageChannel(raw?: string | null): boolean {
   if (channel === INTERNAL_MESSAGE_CHANNEL || channel === "tui") {
     return true;
   }
+  const registeredMeta = getRegisteredChannelPluginMeta(channel);
+  if (registeredMeta) {
+    return registeredMeta.markdownCapable === true;
+  }
   const builtInChannel = normalizeChatChannelId(channel);
   if (builtInChannel) {
+    // Inactive exact owners have no runtime capability metadata yet. Do not
+    // borrow presentation capabilities from a different bundled alias owner.
+    const exactKnownChannelId = resolveKnownChannelPluginId(channel);
+    if (
+      (exactKnownChannelId && exactKnownChannelId.toLowerCase() !== builtInChannel.toLowerCase()) ||
+      hasKnownChannelPluginOwnerOtherThan(channel, builtInChannel)
+    ) {
+      return false;
+    }
     const builtInMeta = findChatChannelMeta(builtInChannel);
     if (builtInMeta) {
       return builtInMeta.markdownCapable === true;
@@ -136,5 +153,5 @@ export function isMarkdownCapableMessageChannel(raw?: string | null): boolean {
       return catalogMeta.channel.markdownCapable === true;
     }
   }
-  return getRegisteredChannelPluginMeta(channel)?.markdownCapable === true;
+  return false;
 }

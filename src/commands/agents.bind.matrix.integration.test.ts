@@ -59,6 +59,25 @@ describe("agents bind matrix integration", () => {
     ]);
   });
 
+  it("prefers an exact registered channel id over a bundled alias", () => {
+    const msteamsPlugin = createBindingResolverTestPlugin({ id: "msteams" });
+    msteamsPlugin.meta.aliases = ["teams"];
+    const workspaceTeamsPlugin = createBindingResolverTestPlugin({ id: "teams" });
+    setActivePluginRegistry(
+      createTestRegistry([
+        { pluginId: "msteams", plugin: msteamsPlugin, source: "test" },
+        { pluginId: "teams", plugin: workspaceTeamsPlugin, source: "test" },
+      ]),
+    );
+
+    const parsed = parseBindingSpecs({ agentId: "main", specs: ["teams"], config: {} });
+
+    expect(parsed.errors).toStrictEqual([]);
+    expect(parsed.bindings).toEqual([
+      { type: "route", agentId: "main", match: { channel: "teams" } },
+    ]);
+  });
+
   afterEach(() => {
     setActivePluginRegistry(createTestRegistry());
   });

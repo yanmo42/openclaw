@@ -3,7 +3,9 @@
 export {
   getChannelPlugin,
   getLoadedChannelPlugin,
+  getLoadedChannelPluginOwnerId,
   getLoadedChannelPluginOrigin,
+  getLoadedChannelPluginCandidateFingerprint,
   listChannelPlugins,
   normalizeChannelId,
 } from "./registry.js";

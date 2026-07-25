@@ -10953,54 +10953,102 @@ public struct ChannelsPairingDismissResult: Codable, Sendable {
 public struct ChannelsStartParams: Codable, Sendable {
     public let channel: String
     public let accountid: String?
+    public let exactchannel: Bool?
+    public let pluginid: String?
+    public let pluginorigin: String?
+    public let plugincandidatefingerprint: String?
 
     public init(
         channel: String,
-        accountid: String? = nil)
+        accountid: String? = nil,
+        exactchannel: Bool? = nil,
+        pluginid: String? = nil,
+        pluginorigin: String? = nil,
+        plugincandidatefingerprint: String? = nil)
     {
         self.channel = channel
         self.accountid = accountid
+        self.exactchannel = exactchannel
+        self.pluginid = pluginid
+        self.pluginorigin = pluginorigin
+        self.plugincandidatefingerprint = plugincandidatefingerprint
     }
 
     private enum CodingKeys: String, CodingKey {
         case channel
         case accountid = "accountId"
+        case exactchannel = "exactChannel"
+        case pluginid = "pluginId"
+        case pluginorigin = "pluginOrigin"
+        case plugincandidatefingerprint = "pluginCandidateFingerprint"
     }
 }
 
 public struct ChannelsStopParams: Codable, Sendable {
     public let channel: String
     public let accountid: String?
+    public let exactchannel: Bool?
+    public let pluginid: String?
+    public let pluginorigin: String?
+    public let plugincandidatefingerprint: String?
 
     public init(
         channel: String,
-        accountid: String? = nil)
+        accountid: String? = nil,
+        exactchannel: Bool? = nil,
+        pluginid: String? = nil,
+        pluginorigin: String? = nil,
+        plugincandidatefingerprint: String? = nil)
     {
         self.channel = channel
         self.accountid = accountid
+        self.exactchannel = exactchannel
+        self.pluginid = pluginid
+        self.pluginorigin = pluginorigin
+        self.plugincandidatefingerprint = plugincandidatefingerprint
     }
 
     private enum CodingKeys: String, CodingKey {
         case channel
         case accountid = "accountId"
+        case exactchannel = "exactChannel"
+        case pluginid = "pluginId"
+        case pluginorigin = "pluginOrigin"
+        case plugincandidatefingerprint = "pluginCandidateFingerprint"
     }
 }
 
 public struct ChannelsLogoutParams: Codable, Sendable {
     public let channel: String
     public let accountid: String?
+    public let exactchannel: Bool?
+    public let pluginid: String?
+    public let pluginorigin: String?
+    public let plugincandidatefingerprint: String?
 
     public init(
         channel: String,
-        accountid: String? = nil)
+        accountid: String? = nil,
+        exactchannel: Bool? = nil,
+        pluginid: String? = nil,
+        pluginorigin: String? = nil,
+        plugincandidatefingerprint: String? = nil)
     {
         self.channel = channel
         self.accountid = accountid
+        self.exactchannel = exactchannel
+        self.pluginid = pluginid
+        self.pluginorigin = pluginorigin
+        self.plugincandidatefingerprint = plugincandidatefingerprint
     }
 
     private enum CodingKeys: String, CodingKey {
         case channel
         case accountid = "accountId"
+        case exactchannel = "exactChannel"
+        case pluginid = "pluginId"
+        case pluginorigin = "pluginOrigin"
+        case plugincandidatefingerprint = "pluginCandidateFingerprint"
     }
 }
 

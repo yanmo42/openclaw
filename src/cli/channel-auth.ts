@@ -12,6 +12,11 @@ import { resolveInstallableChannelPlugin } from "../commands/channel-setup/chann
 import { getRuntimeConfig, readConfigFileSnapshot, type OpenClawConfig } from "../config/config.js";
 import { applyPluginAutoEnable } from "../config/plugin-auto-enable.js";
 import { callGateway } from "../gateway/call.js";
+import {
+  isChannelLifecycleGatewayTargetLocal,
+  isChannelLifecycleOwnershipUnsupportedByGateway,
+  isChannelLifecyclePluginOwnerMismatch,
+} from "../gateway/channel-lifecycle-request.js";
 import { setVerbose } from "../globals.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { isBlockedObjectKey } from "../infra/prototype-keys.js";
@@ -98,6 +103,9 @@ async function resolveChannelPluginForMode(
   configChanged: boolean;
   channelInput: string;
   channelId: string;
+  pluginId: string;
+  pluginOrigin?: string;
+  pluginCandidateFingerprint?: string;
   plugin: ChannelPlugin;
 }> {
   const explicitChannel = opts.channel?.trim();
@@ -133,6 +141,11 @@ async function resolveChannelPluginForMode(
     configChanged: resolved.configChanged,
     channelInput,
     channelId,
+    pluginId: resolved.pluginId ?? plugin.id,
+    ...(resolved.pluginOrigin ? { pluginOrigin: resolved.pluginOrigin } : {}),
+    ...(resolved.pluginCandidateFingerprint
+      ? { pluginCandidateFingerprint: resolved.pluginCandidateFingerprint }
+      : {}),
     plugin,
   };
 }
@@ -161,6 +174,9 @@ async function reconcileGatewayRuntimeAfterLocalLogin(params: {
   cfg: OpenClawConfig;
   plugin: ChannelPlugin;
   channelId: string;
+  pluginId: string;
+  pluginOrigin?: string;
+  pluginCandidateFingerprint?: string;
   accountId: string;
   runtime: RuntimeEnv;
 }) {
@@ -174,6 +190,7 @@ async function reconcileGatewayRuntimeAfterLocalLogin(params: {
     );
     return;
   }
+  const targetIsLocal = isChannelLifecycleGatewayTargetLocal(params.cfg);
   try {
     await callGateway({
       config: params.cfg,
@@ -181,6 +198,14 @@ async function reconcileGatewayRuntimeAfterLocalLogin(params: {
       params: {
         channel: params.channelId,
         accountId: params.accountId,
+        // The Gateway owns the authoritative alias registry and may have a
+        // different plugin snapshot, so every resolved canonical id is exact.
+        exactChannel: true,
+        pluginId: params.pluginId,
+        ...(targetIsLocal && params.pluginOrigin ? { pluginOrigin: params.pluginOrigin } : {}),
+        ...(targetIsLocal && params.pluginCandidateFingerprint
+          ? { pluginCandidateFingerprint: params.pluginCandidateFingerprint }
+          : {}),
       },
       mode: GATEWAY_CLIENT_MODES.BACKEND,
       clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
@@ -189,7 +214,12 @@ async function reconcileGatewayRuntimeAfterLocalLogin(params: {
   } catch (error) {
     // A plugin installed or enabled after Gateway startup is absent from its
     // process-stable registry. Restart only for that exact RPC rejection.
-    if (isChannelMissingFromGatewayRegistry(error)) {
+    if (
+      targetIsLocal &&
+      (isChannelMissingFromGatewayRegistry(error) ||
+        isChannelLifecycleOwnershipUnsupportedByGateway(error, "channels.start") ||
+        isChannelLifecyclePluginOwnerMismatch(error, "channels.start"))
+    ) {
       try {
         await callGateway({
           config: params.cfg,
@@ -216,9 +246,13 @@ async function reconcileGatewayRuntimeAfterLocalLogin(params: {
 async function logoutViaGatewayRuntime(params: {
   cfg: OpenClawConfig;
   channelId: string;
+  pluginId: string;
+  pluginOrigin?: string;
+  pluginCandidateFingerprint?: string;
   accountId: string;
   runtime: RuntimeEnv;
 }): Promise<boolean> {
+  const targetIsLocal = isChannelLifecycleGatewayTargetLocal(params.cfg);
   try {
     await callGateway({
       config: params.cfg,
@@ -226,6 +260,14 @@ async function logoutViaGatewayRuntime(params: {
       params: {
         channel: params.channelId,
         accountId: params.accountId,
+        exactChannel: true,
+        pluginId: params.pluginId,
+        ...(targetIsLocal && params.pluginOrigin ? { pluginOrigin: params.pluginOrigin } : {}),
+        // Candidate fingerprints include host-local source metadata. Remote
+        // Gateways cannot compare those paths with the CLI host.
+        ...(targetIsLocal && params.pluginCandidateFingerprint
+          ? { pluginCandidateFingerprint: params.pluginCandidateFingerprint }
+          : {}),
       },
       mode: GATEWAY_CLIENT_MODES.BACKEND,
       clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
@@ -233,8 +275,34 @@ async function logoutViaGatewayRuntime(params: {
     });
     return true;
   } catch (error) {
-    if (params.cfg.gateway?.mode === "remote") {
+    if (!targetIsLocal) {
+      if (
+        isChannelLifecycleOwnershipUnsupportedByGateway(error, "channels.logout") ||
+        isChannelLifecyclePluginOwnerMismatch(error, "channels.logout")
+      ) {
+        throw new Error(
+          `Remote Gateway could not verify channel plugin ownership for ${params.channelId}; restart or upgrade it before retrying logout.`,
+          { cause: error },
+        );
+      }
       throw error;
+    }
+    if (
+      isChannelLifecycleOwnershipUnsupportedByGateway(error, "channels.logout") ||
+      isChannelLifecyclePluginOwnerMismatch(error, "channels.logout")
+    ) {
+      await callGateway({
+        config: params.cfg,
+        method: "gateway.restart.request",
+        params: { reason: `channel logout: load ${params.channelId}` },
+        mode: GATEWAY_CLIENT_MODES.BACKEND,
+        clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
+        deviceIdentity: null,
+      });
+      throw new Error(
+        `Gateway restart requested; retry channel logout for ${params.channelId}/${params.accountId}.`,
+        { cause: error },
+      );
     }
     params.runtime.log(
       `Local logout will clear auth for ${params.channelId}/${params.accountId}, but the running gateway did not stop it: ${formatErrorMessage(error)}`,
@@ -255,7 +323,14 @@ export async function runChannelLogin(
   const loadedCfg = autoEnabled.config;
   const resolvedChannel = await resolveChannelPluginForMode(opts, "login", loadedCfg, runtime);
   let cfg = resolvedChannel.cfg;
-  const { configChanged, channelInput, plugin } = resolvedChannel;
+  const {
+    configChanged,
+    channelInput,
+    plugin,
+    pluginId,
+    pluginOrigin,
+    pluginCandidateFingerprint,
+  } = resolvedChannel;
   if (autoEnabled.changes.length > 0 || configChanged) {
     const committed = await commitConfigWithPendingPluginInstalls({
       nextConfig: cfg,
@@ -287,6 +362,9 @@ export async function runChannelLogin(
     cfg,
     plugin,
     channelId: plugin.id,
+    pluginId,
+    ...(pluginOrigin ? { pluginOrigin } : {}),
+    ...(pluginCandidateFingerprint ? { pluginCandidateFingerprint } : {}),
     accountId,
     runtime,
   });
@@ -304,7 +382,14 @@ export async function runChannelLogout(
   const loadedCfg = autoEnabled.config;
   const resolvedChannel = await resolveChannelPluginForMode(opts, "logout", loadedCfg, runtime);
   let cfg = resolvedChannel.cfg;
-  const { configChanged, channelInput, plugin } = resolvedChannel;
+  const {
+    configChanged,
+    channelInput,
+    plugin,
+    pluginId,
+    pluginOrigin,
+    pluginCandidateFingerprint,
+  } = resolvedChannel;
   if (autoEnabled.changes.length > 0 || configChanged) {
     const committed = await commitConfigWithPendingPluginInstalls({
       nextConfig: cfg,
@@ -328,6 +413,9 @@ export async function runChannelLogout(
     await logoutViaGatewayRuntime({
       cfg,
       channelId: plugin.id,
+      pluginId,
+      ...(pluginOrigin ? { pluginOrigin } : {}),
+      ...(pluginCandidateFingerprint ? { pluginCandidateFingerprint } : {}),
       accountId,
       runtime,
     })

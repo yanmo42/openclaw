@@ -113,6 +113,7 @@ async function resolveParsedBindingsOrExit(params: {
   agentId: string;
   bindValues: string[] | undefined;
   emptyMessage: string;
+  includeDisabledManifestChannels?: boolean;
 }): Promise<{
   bindings: AgentRouteBinding[];
   errors: string[];
@@ -125,7 +126,12 @@ async function resolveParsedBindingsOrExit(params: {
   }
 
   const { parseBindingSpecs } = await loadAgentBindingsModule();
-  const parsed = parseBindingSpecs({ agentId: params.agentId, specs, config: params.cfg });
+  const parsed = parseBindingSpecs({
+    agentId: params.agentId,
+    specs,
+    config: params.cfg,
+    ...(params.includeDisabledManifestChannels ? { includeDisabledManifestChannels: true } : {}),
+  });
   if (parsed.errors.length > 0) {
     params.runtime.error(parsed.errors.join("\n"));
     params.runtime.exit(1);
@@ -385,6 +391,7 @@ export async function agentsUnbindCommand(
     agentId,
     bindValues: opts.bind,
     emptyMessage: "Provide at least one --bind <channel[:accountId]> or use --all.",
+    includeDisabledManifestChannels: true,
   });
   if (!parsed) {
     return;

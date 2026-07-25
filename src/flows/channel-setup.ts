@@ -821,9 +821,9 @@ export async function setupChannels(
     return "done";
   };
 
-  if (options?.directEntryChannel) {
-    await handleChannelChoice(options.directEntryChannel);
-  }
+  const directEntryOutcome = options?.directEntryChannel
+    ? await handleChannelChoice(options.directEntryChannel)
+    : undefined;
 
   if (options?.quickstartDefaults) {
     const skipValue = "__skip__" as const;
@@ -858,7 +858,13 @@ export async function setupChannels(
     }
   } else {
     const doneValue = "__done__" as const;
-    const initialValue = options?.initialSelection?.[0] ?? quickstartDefault;
+    const directEntryCompleted =
+      directEntryOutcome === "done" &&
+      options?.directEntryChannel !== undefined &&
+      selection.includes(options.directEntryChannel);
+    const initialValue = directEntryCompleted
+      ? doneValue
+      : (options?.initialSelection?.[0] ?? options?.directEntryChannel ?? quickstartDefault);
     while (true) {
       const { entries, catalogById } = getChannelEntries();
       const choice = await prompter.select({

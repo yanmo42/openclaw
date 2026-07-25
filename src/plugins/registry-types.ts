@@ -136,6 +136,8 @@ type PluginHostedMediaResolverRegistration = {
 export type PluginChannelRegistration = {
   pluginId: string;
   pluginName?: string;
+  pluginVersion?: string;
+  pluginCandidateVersion?: string;
   plugin: ChannelPlugin;
   /** Loader-owned provenance. Missing values are conservative legacy registrations. */
   origin?: PluginOrigin;
@@ -146,6 +148,8 @@ export type PluginChannelRegistration = {
 type PluginChannelSetupRegistration = {
   pluginId: string;
   pluginName?: string;
+  pluginVersion?: string;
+  pluginCandidateVersion?: string;
   plugin: ChannelPlugin;
   /** Loader-owned provenance. Missing values are conservative legacy registrations. */
   origin?: PluginOrigin;
@@ -417,6 +421,7 @@ export type PluginRecord = {
   version?: string;
   builtWithOpenClawVersion?: string;
   packageName?: string;
+  candidateVersion?: string;
   description?: string;
   format?: PluginFormat;
   bundleFormat?: PluginBundleFormat;

@@ -496,7 +496,7 @@ describe("channelsAddCommand", () => {
       config,
     });
 
-    await channelsAddCommand({}, runtime, { hasFlags: false });
+    await channelsAddCommand({}, runtime, { hasFlags: false, directEntry: true });
 
     expect(channelWizardMocks.prompter.intro).toHaveBeenCalledWith("Channel setup");
     expect(setupChannelArg(0)).toBe(config);
@@ -592,6 +592,133 @@ describe("channelsAddCommand", () => {
     expect(setupOptions().directEntryChannel).toBe("external-chat");
   });
 
+  it("does not redirect a setup-hidden exact catalog id to another channel's alias", async () => {
+    const config: OpenClawConfig = { channels: {} };
+    const baseEntry = createExternalChatCatalogEntry();
+    const hiddenExactEntry: ChannelPluginCatalogEntry = {
+      ...baseEntry,
+      id: "teams",
+      channel: {
+        ...baseEntry.channel,
+        id: "teams",
+        label: "Hidden Teams",
+      },
+      meta: {
+        ...baseEntry.meta,
+        id: "teams",
+        label: "Hidden Teams",
+        selectionLabel: "Hidden Teams",
+        exposure: { setup: false },
+      },
+    };
+    configMocks.readConfigFileSnapshot.mockResolvedValue({
+      ...baseConfigSnapshot,
+      sourceConfig: config,
+      config,
+    });
+    catalogMocks.getChannelPluginCatalogEntry.mockReturnValue(hiddenExactEntry);
+    catalogMocks.listChannelPluginCatalogEntries.mockReturnValue([
+      hiddenExactEntry,
+      {
+        ...baseEntry,
+        meta: {
+          ...baseEntry.meta,
+          aliases: ["teams"],
+        },
+      },
+    ]);
+
+    await channelsAddCommand({ channel: "teams" }, runtime, {
+      hasFlags: false,
+      directEntry: true,
+    });
+
+    expect(setupOptions().initialSelection).toBeUndefined();
+    expect(setupOptions().directEntryChannel).toBeUndefined();
+  });
+
+  it("does not redirect a mixed-case hidden exact catalog id to another channel's alias", async () => {
+    const config: OpenClawConfig = { channels: {} };
+    const baseEntry = createExternalChatCatalogEntry();
+    const hiddenExactEntry: ChannelPluginCatalogEntry = {
+      ...baseEntry,
+      id: "CaseChat",
+      channel: {
+        ...baseEntry.channel,
+        id: "CaseChat",
+        label: "Hidden Case Chat",
+      },
+      meta: {
+        ...baseEntry.meta,
+        id: "CaseChat",
+        label: "Hidden Case Chat",
+        selectionLabel: "Hidden Case Chat",
+        exposure: { setup: false },
+      },
+    };
+    const aliasEntry: ChannelPluginCatalogEntry = {
+      ...baseEntry,
+      meta: {
+        ...baseEntry.meta,
+        aliases: ["casechat"],
+      },
+    };
+    configMocks.readConfigFileSnapshot.mockResolvedValue({
+      ...baseConfigSnapshot,
+      sourceConfig: config,
+      config,
+    });
+    catalogMocks.getChannelPluginCatalogEntry.mockImplementation((channelId: string) =>
+      channelId === "CaseChat" ? hiddenExactEntry : undefined,
+    );
+    catalogMocks.listChannelPluginCatalogEntries.mockReturnValue([hiddenExactEntry, aliasEntry]);
+
+    await channelsAddCommand({ channel: "casechat" }, runtime, {
+      hasFlags: false,
+      directEntry: true,
+    });
+
+    expect(setupOptions().initialSelection).toBeUndefined();
+    expect(setupOptions().directEntryChannel).toBeUndefined();
+  });
+
+  it("opens a stale configured catalog channel by exact id before a bundled alias", async () => {
+    const config: OpenClawConfig = {
+      channels: { teams: { token: "stale" } },
+    };
+    const baseCatalogEntry = createExternalChatCatalogEntry();
+    const exactTeamsEntry: ChannelPluginCatalogEntry = {
+      ...baseCatalogEntry,
+      id: "teams",
+      channel: {
+        ...baseCatalogEntry.channel,
+        id: "teams",
+        label: "External Teams",
+      },
+      meta: {
+        ...baseCatalogEntry.meta,
+        id: "teams",
+        label: "External Teams",
+        selectionLabel: "External Teams",
+      },
+    };
+    configMocks.readConfigFileSnapshot.mockResolvedValue({
+      ...baseConfigSnapshot,
+      sourceConfig: config,
+      config,
+    });
+    catalogMocks.getChannelPluginCatalogEntry.mockReturnValue(exactTeamsEntry);
+    catalogMocks.listChannelPluginCatalogEntries.mockReturnValue([exactTeamsEntry]);
+
+    await channelsAddCommand({ channel: "teams" }, runtime, {
+      hasFlags: false,
+      directEntry: true,
+    });
+
+    expect(setupOptions().initialSelection).toEqual(["teams"]);
+    expect(setupOptions().directEntryChannel).toBe("teams");
+  });
+
   it("prefers an exact channel id over an earlier channel alias", async () => {
     const config: OpenClawConfig = { channels: {} };
     const baseCatalogEntry = createExternalChatCatalogEntry();
@@ -664,6 +791,64 @@ describe("channelsAddCommand", () => {
         channel: "teams",
       }),
     );
+  });
+
+  it("keeps an exact loaded channel id when the catalog only contains another owner's alias", async () => {
+    const exactTeams = {
+      ...createChannelTestPluginBase({
+        id: "teams",
+        label: "Workspace Teams",
+      }),
+      setup: {
+        applyAccountConfig: ({ cfg }: ApplyAccountConfigParams) => ({
+          ...cfg,
+          channels: {
+            ...cfg.channels,
+            teams: { enabled: true },
+          },
+        }),
+      },
+    };
+    const msteams = createChannelTestPluginBase({
+      id: "msteams",
+      label: "Microsoft Teams",
+    });
+    setActivePluginRegistry(
+      createTestRegistry([
+        {
+          pluginId: "msteams",
+          plugin: {
+            ...msteams,
+            meta: { ...msteams.meta, aliases: ["teams"] },
+          },
+          source: "test",
+        },
+        {
+          pluginId: "teams-workspace",
+          plugin: exactTeams,
+          source: "test",
+        },
+      ]),
+    );
+    configMocks.readConfigFileSnapshot.mockResolvedValue({ ...baseConfigSnapshot });
+    const aliasOwner = createExternalChatCatalogEntry();
+    catalogMocks.listChannelPluginCatalogEntries.mockReturnValue([
+      {
+        ...aliasOwner,
+        meta: {
+          ...aliasOwner.meta,
+          aliases: ["teams"],
+        },
+      },
+    ]);
+
+    await channelsAddCommand({ channel: "teams", token: "secret" }, runtime, {
+      hasFlags: true,
+    });
+
+    expect(writtenChannel("teams").enabled).toBe(true);
+    expect(ensureChannelSetupPluginInstalled).not.toHaveBeenCalled();
+    expect(loadChannelSetupPluginRegistrySnapshotForChannel).not.toHaveBeenCalled();
   });
 
   it("exits quietly when guided channel setup is cancelled", async () => {
@@ -1357,6 +1542,53 @@ describe("channelsAddCommand", () => {
       enabled: true,
       groupChannels: ["chat/~host/general", "chat/~host/random"],
       dmAllowlist: ["~zod", "~nec"],
+    });
+  });
+
+  it("uses legacy coercion metadata carried from CLI registration", async () => {
+    const applyAccountConfig = vi.fn(({ cfg, input }: ApplyAccountConfigParams) => ({
+      ...cfg,
+      channels: {
+        ...cfg.channels,
+        tlon: {
+          enabled: true,
+          groupChannels: input.groupChannels,
+        },
+      },
+    }));
+    const plugin = {
+      ...createChannelTestPluginBase({ id: "workspace-lists", label: "Workspace Lists" }),
+      setup: { applyAccountConfig },
+    };
+    catalogMocks.listChannelPluginCatalogEntries.mockReturnValue([]);
+    configMocks.readConfigFileSnapshot.mockResolvedValue({ ...baseConfigSnapshot });
+    setActivePluginRegistry(
+      createTestRegistry([{ pluginId: "workspace-lists", plugin, source: "test" }]),
+    );
+
+    await channelsAddCommand(
+      {
+        channel: "workspace-lists",
+        groupChannels: "chat/~host/general, chat/~host/random",
+      },
+      runtime,
+      {
+        hasFlags: true,
+        setupValueMetadataByAttributeName: new Map([
+          [
+            "groupChannels",
+            {
+              longFlag: "--group-channels",
+              valueType: "list",
+            },
+          ],
+        ]),
+      },
+    );
+
+    expect(writtenChannel("tlon")).toEqual({
+      enabled: true,
+      groupChannels: ["chat/~host/general", "chat/~host/random"],
     });
   });
 

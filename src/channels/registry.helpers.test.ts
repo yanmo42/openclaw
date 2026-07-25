@@ -94,6 +94,25 @@ describe("channel registry helpers", () => {
     expect(normalizeAnyChannelId("qq")).toBe("qqbot");
   });
 
+  it("prefers an exact registered channel id over an earlier alias", () => {
+    const registry = createTestRegistry([
+      {
+        pluginId: "msteams",
+        plugin: { id: "msteams", meta: { aliases: ["teams"] } },
+        source: "test",
+      },
+      {
+        pluginId: "teams",
+        plugin: { id: "teams", meta: { aliases: [] } },
+        source: "test",
+      },
+    ]);
+    setActivePluginRegistry(registry);
+
+    expect(normalizeAnyChannelId("teams")).toBe("teams");
+    expect(normalizeAnyChannelIdLight("teams")).toBe("teams");
+  });
+
   it("rebuilds registered channel lookups when pinned-empty fallback active registry changes", () => {
     const startupRegistry = createEmptyPluginRegistry();
     setActivePluginRegistry(startupRegistry);

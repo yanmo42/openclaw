@@ -1,8 +1,14 @@
 // Implements guided and non-interactive `openclaw channels add` account setup.
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../../agents/agent-scope.js";
 import { getBundledChannelSetupPlugin } from "../../channels/plugins/bundled.js";
-import { resolveChannelSetupCliOptionMetadata } from "../../channels/plugins/cli-add-options.js";
-import { findChannelEntryByIdOrAlias } from "../../channels/plugins/entry-resolution.js";
+import {
+  resolveChannelSetupCliOptionMetadata,
+  type ChannelSetupCliOptionValueMetadata,
+} from "../../channels/plugins/cli-add-options.js";
+import {
+  channelEntryHasExactId,
+  findChannelEntryByIdOrAlias,
+} from "../../channels/plugins/entry-resolution.js";
 import { parseOptionalDelimitedEntries } from "../../channels/plugins/helpers.js";
 import { getLoadedChannelPlugin, normalizeChannelId } from "../../channels/plugins/index.js";
 import { resolveChannelSetupExecutionAdapter } from "../../channels/plugins/setup-contract.js";
@@ -58,6 +64,11 @@ export type ChannelsAddCommandParams = {
    * retain picker-first navigation with the same channel highlighted.
    */
   directEntry?: boolean;
+  /**
+   * Preserves the legacy option contract selected during CLI registration.
+   * This avoids re-resolving a different owner after Commander has parsed values.
+   */
+  setupValueMetadataByAttributeName?: ReadonlyMap<string, ChannelSetupCliOptionValueMetadata>;
 };
 
 const CHANNEL_ADD_CONTROL_OPTION_KEYS = new Set(["channel", "account"]);
@@ -78,9 +89,14 @@ async function resolveCatalogChannelEntry(raw: string, cfg: OpenClawConfig | nul
   return findChannelEntryByIdOrAlias(entries, raw);
 }
 
-function buildChannelSetupInput(opts: ChannelsAddOptions): ChannelSetupInput {
+function buildChannelSetupInput(
+  opts: ChannelsAddOptions,
+  registeredValueMetadata?: ReadonlyMap<string, ChannelSetupCliOptionValueMetadata>,
+): ChannelSetupInput {
   const input: Record<string, unknown> = {};
-  const { valueMetadataByAttributeName } = resolveChannelSetupCliOptionMetadata(opts.channel);
+  const valueMetadataByAttributeName =
+    registeredValueMetadata ??
+    resolveChannelSetupCliOptionMetadata(opts.channel).valueMetadataByAttributeName;
   for (const [key, value] of Object.entries(opts)) {
     if (CHANNEL_ADD_CONTROL_OPTION_KEYS.has(key) || value === undefined) {
       continue;
@@ -170,8 +186,16 @@ async function channelsAddCommandImpl(
   }
 
   const rawChannel = opts.channel ?? "";
-  let catalogEntry = await resolveCatalogChannelEntry(rawChannel, nextConfig);
-  let channel = catalogEntry ? (catalogEntry.id as ChannelId) : normalizeChannelId(rawChannel);
+  const normalizedChannel = normalizeChannelId(rawChannel);
+  const catalogMatch = await resolveCatalogChannelEntry(rawChannel, nextConfig);
+  let catalogEntry =
+    catalogMatch &&
+    (!normalizedChannel ||
+      channelEntryHasExactId(catalogMatch, rawChannel) ||
+      catalogMatch.id === normalizedChannel)
+      ? catalogMatch
+      : undefined;
+  let channel = catalogEntry ? (catalogEntry.id as ChannelId) : normalizedChannel;
   const resolveWorkspaceDir = () =>
     resolveAgentWorkspaceDir(nextConfig, resolveDefaultAgentId(nextConfig));
   // May load a scoped plugin when the channel is not already registered.
@@ -272,7 +296,7 @@ async function channelsAddCommandImpl(
     }
     input = parsed.value;
   } else {
-    input = buildChannelSetupInput(opts);
+    input = buildChannelSetupInput(opts, params?.setupValueMetadataByAttributeName);
   }
   const accountId =
     setup.resolveAccountId?.({

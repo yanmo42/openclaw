@@ -51,6 +51,7 @@ export type ChannelPluginCatalogEntry = {
   id: string;
   pluginId?: string;
   origin?: PluginOrigin;
+  preferredRuntimeOwner?: boolean;
   trustedSourceLinkedOfficialInstall?: boolean;
   channel?: PluginPackageChannel;
   meta: ChannelMeta;
@@ -365,6 +366,7 @@ function buildCatalogEntryFromManifest(params: {
   packageVersion?: string;
   packageDir?: string;
   origin?: PluginOrigin;
+  preferredRuntimeOwner?: boolean;
   trustedSourceLinkedOfficialInstall?: boolean;
   workspaceDir?: string;
   channel?: PluginPackageChannel;
@@ -396,6 +398,9 @@ function buildCatalogEntryFromManifest(params: {
     id,
     ...(pluginId ? { pluginId } : {}),
     ...(params.origin ? { origin: params.origin } : {}),
+    ...(params.preferredRuntimeOwner !== undefined
+      ? { preferredRuntimeOwner: params.preferredRuntimeOwner }
+      : {}),
     ...(params.trustedSourceLinkedOfficialInstall
       ? { trustedSourceLinkedOfficialInstall: true }
       : {}),
@@ -473,11 +478,34 @@ export function listRawChannelPluginCatalogEntries(
     discovery: options.discovery,
   });
   const resolved = new Map<string, { entry: ChannelPluginCatalogEntry; priority: number }>();
-
-  for (const candidate of manifestEntries) {
+  const eligibleManifestEntries = manifestEntries.filter(
+    (candidate) =>
+      !shouldExcludeCatalogOrigin(options, candidate.origin) &&
+      !shouldExcludeCatalogPlugin(options, candidate.pluginId, candidate.origin),
+  );
+  const runtimeWinnerByPluginId = new Map<string, (typeof eligibleManifestEntries)[number]>();
+  for (const candidate of eligibleManifestEntries) {
+    if (candidate.runtimeOwnerRank === undefined) {
+      continue;
+    }
+    const existing = runtimeWinnerByPluginId.get(candidate.pluginId);
     if (
-      shouldExcludeCatalogOrigin(options, candidate.origin) ||
-      shouldExcludeCatalogPlugin(options, candidate.pluginId, candidate.origin)
+      !existing ||
+      candidate.runtimeOwnerRank < (existing.runtimeOwnerRank ?? Number.POSITIVE_INFINITY)
+    ) {
+      runtimeWinnerByPluginId.set(candidate.pluginId, candidate);
+    }
+  }
+
+  for (const candidate of eligibleManifestEntries) {
+    // Unranked duplicate losers failed runtime validation. Exposing them here would let setup
+    // select metadata for a plugin candidate that runtime cannot load.
+    if (candidate.preferredRuntimeOwner === false && candidate.runtimeOwnerRank === undefined) {
+      continue;
+    }
+    if (
+      candidate.runtimeOwnerRank !== undefined &&
+      runtimeWinnerByPluginId.get(candidate.pluginId) !== candidate
     ) {
       continue;
     }
@@ -486,6 +514,8 @@ export function listRawChannelPluginCatalogEntries(
       packageName: candidate.packageName,
       packageDir: candidate.rootDir,
       origin: candidate.origin,
+      preferredRuntimeOwner:
+        candidate.runtimeOwnerRank !== undefined ? true : candidate.preferredRuntimeOwner,
       workspaceDir: candidate.workspaceDir ?? options.workspaceDir,
       channel: candidate.channel,
       install: candidate.install,

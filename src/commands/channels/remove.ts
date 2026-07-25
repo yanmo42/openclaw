@@ -11,6 +11,11 @@ import {
 } from "../../cli/error-format.js";
 import { replaceConfigFile, type OpenClawConfig } from "../../config/config.js";
 import { callGateway } from "../../gateway/call.js";
+import {
+  isChannelLifecycleGatewayTargetLocal,
+  isChannelLifecycleOwnershipUnsupportedByGateway,
+  isChannelLifecyclePluginOwnerMismatch,
+} from "../../gateway/channel-lifecycle-request.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { commitConfigWithPendingPluginInstalls } from "../../plugins/install-record-commit.js";
 import { refreshPluginRegistryAfterConfigMutation } from "../../plugins/registry-refresh.js";
@@ -43,13 +48,17 @@ function listAccountIds(
 async function stopGatewayRuntimeBeforeRemove(params: {
   cfg: OpenClawConfig;
   channel: ChatChannel;
+  pluginId: string;
+  pluginOrigin?: string;
+  pluginCandidateFingerprint?: string;
   accountId: string;
   plugin: ChannelPlugin;
   runtime: RuntimeEnv;
-}) {
+}): Promise<boolean> {
   if (!params.plugin.gateway?.startAccount && !params.plugin.gateway?.logoutAccount) {
-    return;
+    return true;
   }
+  const targetIsLocal = isChannelLifecycleGatewayTargetLocal(params.cfg);
   try {
     await callGateway({
       config: params.cfg,
@@ -57,15 +66,58 @@ async function stopGatewayRuntimeBeforeRemove(params: {
       params: {
         channel: params.channel,
         accountId: params.accountId,
+        // The Gateway owns the authoritative alias registry and may have a
+        // different plugin snapshot, so every resolved canonical id is exact.
+        exactChannel: true,
+        pluginId: params.pluginId,
+        ...(targetIsLocal && params.pluginOrigin ? { pluginOrigin: params.pluginOrigin } : {}),
+        // Candidate fingerprints include host-local source metadata. Remote
+        // Gateways cannot compare those paths with the CLI host.
+        ...(targetIsLocal && params.pluginCandidateFingerprint
+          ? { pluginCandidateFingerprint: params.pluginCandidateFingerprint }
+          : {}),
       },
       mode: GATEWAY_CLIENT_MODES.BACKEND,
       clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
       deviceIdentity: null,
     });
+    return true;
   } catch (error) {
+    if (
+      isChannelLifecycleOwnershipUnsupportedByGateway(error, "channels.stop") ||
+      isChannelLifecyclePluginOwnerMismatch(error, "channels.stop")
+    ) {
+      if (!targetIsLocal) {
+        params.runtime.error(
+          `Remote Gateway could not verify channel plugin ownership for ${channelLabel(params.channel)}; restart or upgrade it before retrying removal.`,
+        );
+        params.runtime.exit(1);
+        return false;
+      }
+      try {
+        await callGateway({
+          config: params.cfg,
+          method: "gateway.restart.request",
+          params: { reason: `channel remove: load ${params.channel}` },
+          mode: GATEWAY_CLIENT_MODES.BACKEND,
+          clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
+          deviceIdentity: null,
+        });
+        params.runtime.error(
+          `Gateway restart requested; retry removing ${channelLabel(params.channel)} after it restarts.`,
+        );
+      } catch {
+        params.runtime.error(
+          `The running Gateway must be restarted before removing ${channelLabel(params.channel)} safely: ${formatErrorMessage(error)}`,
+        );
+      }
+      params.runtime.exit(1);
+      return false;
+    }
     params.runtime.log(
       `Could not stop running ${channelLabel(params.channel)} account "${params.accountId}" before removing it: ${formatErrorMessage(error)}`,
     );
+    return true;
   }
 }
 
@@ -118,34 +170,12 @@ export async function channelsRemoveCommand(
       });
       return normalizeAccountId(choice);
     })();
-
-    const wantsDisable = await prompter.confirm({
-      message: `Disable ${channelLabel(selectedChannel)} account "${accountId}"? (keeps config)`,
-      initialValue: true,
-    });
-    if (!wantsDisable) {
-      await prompter.outro("Cancelled.");
-      return;
-    }
-  } else {
-    if (!rawChannel) {
-      runtime.error(
-        `Missing channel. Use ${formatCliCommand("openclaw channels remove --channel <name>")} or run ${formatCliCommand("openclaw channels status")} to inspect configured channels.`,
-      );
-      runtime.exit(1);
-      return;
-    }
-    if (!deleteConfig) {
-      const confirm = createClackPrompter();
-      const channelPromptLabel = channel ? channelLabel(channel) : rawChannel;
-      const ok = await confirm.confirm({
-        message: `Disable ${channelPromptLabel} account "${accountId}"? (keeps config)`,
-        initialValue: true,
-      });
-      if (!ok) {
-        return;
-      }
-    }
+  } else if (!rawChannel) {
+    runtime.error(
+      `Missing channel. Use ${formatCliCommand("openclaw channels remove --channel <name>")} or run ${formatCliCommand("openclaw channels status")} to inspect configured channels.`,
+    );
+    runtime.exit(1);
+    return;
   }
 
   const shouldResolveInstallablePlugin = Boolean(lookupChannel || channel);
@@ -188,14 +218,40 @@ export async function channelsRemoveCommand(
   const resolvedAccountId =
     normalizeAccountId(accountId) ?? resolveChannelDefaultAccountId({ plugin, cfg });
   const accountKey = resolvedAccountId || DEFAULT_ACCOUNT_ID;
+  if (useWizard || !deleteConfig) {
+    const confirm = prompter ?? createClackPrompter();
+    const action = deleteConfig ? "Delete" : "Disable";
+    const detail = deleteConfig ? "removes config" : "keeps config";
+    const confirmed = await confirm.confirm({
+      message: `${action} ${plugin.meta.label ?? channelLabel(resolvedChannelId)} account "${accountKey}"? (${detail})`,
+      initialValue: true,
+    });
+    if (!confirmed) {
+      if (prompter) {
+        await prompter.outro("Cancelled.");
+      }
+      return;
+    }
+  }
 
-  await stopGatewayRuntimeBeforeRemove({
-    cfg,
-    channel: resolvedChannelId,
-    accountId: accountKey,
-    plugin,
-    runtime,
-  });
+  if (
+    !(await stopGatewayRuntimeBeforeRemove({
+      cfg,
+      channel: resolvedChannelId,
+      pluginId: resolvedPluginState?.pluginId ?? plugin.id,
+      ...(resolvedPluginState?.pluginOrigin
+        ? { pluginOrigin: resolvedPluginState.pluginOrigin }
+        : {}),
+      ...(resolvedPluginState?.pluginCandidateFingerprint
+        ? { pluginCandidateFingerprint: resolvedPluginState.pluginCandidateFingerprint }
+        : {}),
+      accountId: accountKey,
+      plugin,
+      runtime,
+    }))
+  ) {
+    return;
+  }
 
   let next = { ...cfg };
   const prevCfg = cfg;

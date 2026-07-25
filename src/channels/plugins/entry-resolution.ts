@@ -7,6 +7,11 @@ type ChannelEntryIdentity = {
   };
 };
 
+export function channelEntryHasExactId(entry: ChannelEntryIdentity, raw: string): boolean {
+  const normalized = normalizeOptionalLowercaseString(raw);
+  return Boolean(normalized && normalizeOptionalLowercaseString(entry.id) === normalized);
+}
+
 /**
  * Canonical ids own collisions with aliases so every channel setup surface
  * resolves the same user input to the same plugin.

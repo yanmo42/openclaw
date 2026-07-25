@@ -5,6 +5,7 @@ import type { ChannelId } from "./plugins/channel-id.types.js";
 import type { ChannelMeta } from "./plugins/types.core.js";
 import {
   findRegisteredChannelPluginEntryById,
+  listKnownChannelPluginIds,
   listRegisteredChannelPluginEntries,
 } from "./registry-lookup.js";
 export { findChatChannelMeta } from "./chat-meta.js";
@@ -29,6 +30,8 @@ export function listRegisteredChannelPluginIds(): ChannelId[] {
     return id ? [id as ChannelId] : [];
   });
 }
+
+export { listKnownChannelPluginIds };
 
 /**
  * Returns lightweight channel metadata used by message formatting and capability checks.

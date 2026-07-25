@@ -5,6 +5,7 @@ import type { PluginRegistry } from "../../plugins/registry.js";
 import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../../plugins/runtime.js";
 import {
   getChannelPlugin,
+  getLoadedChannelPluginCandidateFingerprint,
   listChannelPlugins,
   resolveChannelPluginRegistration,
 } from "./registry.js";
@@ -72,6 +73,49 @@ describe("listChannelPlugins", () => {
         },
       },
     });
+  });
+
+  it("keeps the candidate fingerprint stable across runtime definition versions", () => {
+    const registry = createEmptyPluginRegistry();
+    registry.channels = [
+      {
+        pluginId: "external-fallback",
+        pluginVersion: "1.2.3",
+        pluginCandidateVersion: "2026.7.2",
+        plugin: {
+          id: "fallback",
+          meta: { label: "external fallback" },
+        } as never,
+        origin: "config",
+        source: "/plugins/external-fallback/index.js",
+        rootDir: "/plugins/external-fallback",
+      },
+    ];
+    setActivePluginRegistry(registry);
+
+    const first = getLoadedChannelPluginCandidateFingerprint("fallback");
+    expect(first).toMatch(/^[a-f0-9]{64}$/);
+    expect(first).not.toContain("/plugins/external-fallback");
+
+    const initialRegistration = registry.channels[0];
+    if (!initialRegistration) {
+      throw new Error("expected channel registration");
+    }
+    registry.channels[0] = {
+      ...initialRegistration,
+      pluginVersion: "1.2.4",
+    };
+    setActivePluginRegistry(registry);
+
+    expect(getLoadedChannelPluginCandidateFingerprint("fallback")).toBe(first);
+
+    registry.channels[0] = {
+      ...initialRegistration,
+      pluginCandidateVersion: "2026.7.3",
+    };
+    setActivePluginRegistry(registry);
+
+    expect(getLoadedChannelPluginCandidateFingerprint("fallback")).not.toBe(first);
   });
 
   it("rebuilds channel lookups when the active registry object changes without a version bump", () => {

@@ -9,6 +9,7 @@ afterEach(() => {
   vi.resetModules();
   vi.doUnmock("./discovery.js");
   vi.doUnmock("./installed-plugin-index-record-reader.js");
+  vi.doUnmock("./manifest-registry.js");
 });
 
 const ENV: NodeJS.ProcessEnv = { HOME: "/tmp/openclaw-test-home" };
@@ -32,26 +33,48 @@ function emptyDiscoveryResult(): PluginDiscoveryResult {
 
 async function loadWithMocks(params: {
   loadRecords?: (env: NodeJS.ProcessEnv | undefined) => Record<string, PluginInstallRecord>;
+  isCandidateLoadable?: (candidate: PluginCandidate) => boolean;
 }): Promise<{
   module: typeof import("./channel-catalog-registry.js");
   discoverSpy: ReturnType<typeof vi.fn>;
   loadRecordsSpy: ReturnType<typeof vi.fn>;
+  loadManifestRegistrySpy: ReturnType<typeof vi.fn>;
 }> {
   const discoverSpy = vi.fn(() => emptyDiscoveryResult());
   const loadRecordsSpy = vi.fn((opts: { env?: NodeJS.ProcessEnv } = {}) => {
     return params.loadRecords ? params.loadRecords(opts.env) : RECORDS;
   });
+  const loadManifestRegistrySpy = vi.fn(
+    ({ candidates }: { candidates?: PluginCandidate[] } = {}) => ({
+      plugins: (candidates ?? [])
+        .filter((candidate) => params.isCandidateLoadable?.(candidate) !== false)
+        .map((candidate) => ({
+          id:
+            candidate.bundledManifest?.id ??
+            candidate.bundledManifestId ??
+            candidate.packageManifest?.plugin?.id ??
+            candidate.idHint,
+          origin: candidate.origin,
+          rootDir: candidate.rootDir,
+          source: candidate.source,
+        })),
+      diagnostics: [],
+    }),
+  );
 
   vi.doMock("./discovery.js", () => ({ discoverOpenClawPlugins: discoverSpy }));
   vi.doMock("./installed-plugin-index-record-reader.js", () => ({
     loadInstalledPluginIndexInstallRecordsSync: loadRecordsSpy,
+  }));
+  vi.doMock("./manifest-registry.js", () => ({
+    loadPluginManifestRegistry: loadManifestRegistrySpy,
   }));
 
   const module = await importFreshModule<typeof import("./channel-catalog-registry.js")>(
     import.meta.url,
     `./channel-catalog-registry.js?case=${++loadCase}`,
   );
-  return { module, discoverSpy, loadRecordsSpy };
+  return { module, discoverSpy, loadRecordsSpy, loadManifestRegistrySpy };
 }
 
 function firstDiscoverOptions(discoverSpy: ReturnType<typeof vi.fn>): Record<string, unknown> {
@@ -67,21 +90,24 @@ function firstDiscoverOptions(discoverSpy: ReturnType<typeof vi.fn>): Record<str
 }
 
 function createChannelCandidate(params: {
+  channelId?: string;
   idHint?: string;
   pluginId?: string;
   bundledPluginId?: string;
   origin?: PluginCandidate["origin"];
+  rootDir?: string;
 }): PluginCandidate {
+  const rootDir = params.rootDir ?? "/tmp/openclaw-test-plugin";
   return {
     idHint: params.idHint ?? "hint-plugin",
-    source: "/tmp/openclaw-test-plugin/index.js",
-    rootDir: "/tmp/openclaw-test-plugin",
+    source: `${rootDir}/index.js`,
+    rootDir,
     origin: params.origin ?? "global",
     packageName: "@vendor/openclaw-test-plugin",
     packageManifest: {
       ...(params.pluginId ? { plugin: { id: params.pluginId } } : {}),
       channel: {
-        id: "test-channel",
+        id: params.channelId ?? "test-channel",
         name: "Test Channel",
         description: "Test channel",
       },
@@ -225,5 +251,158 @@ describe("listChannelCatalogEntries", () => {
         },
       })[0]?.pluginId,
     ).toBe("bundled-plugin");
+  });
+
+  it("records the single runtime winner for bundled plugin-id duplicates", async () => {
+    const { module } = await loadWithMocks({
+      loadRecords: () => ({
+        telegram: {
+          source: "npm",
+          installPath: "/tmp/global-telegram",
+        } as PluginInstallRecord,
+      }),
+    });
+
+    const entries = module.listChannelCatalogEntries({
+      env: ENV,
+      discovery: {
+        candidates: [
+          createChannelCandidate({
+            bundledPluginId: "telegram",
+            idHint: "telegram",
+            origin: "bundled",
+            rootDir: "/tmp/bundled-telegram",
+          }),
+          createChannelCandidate({
+            pluginId: "telegram",
+            idHint: "telegram",
+            origin: "config",
+            rootDir: "/tmp/config-telegram",
+          }),
+          createChannelCandidate({
+            pluginId: "telegram",
+            idHint: "telegram",
+            origin: "global",
+            rootDir: "/tmp/global-telegram",
+          }),
+          createChannelCandidate({
+            pluginId: "telegram",
+            idHint: "telegram",
+            origin: "workspace",
+            rootDir: "/tmp/workspace-telegram",
+          }),
+        ],
+        diagnostics: [],
+      },
+    });
+
+    expect(entries.find((entry) => entry.origin === "config")?.preferredRuntimeOwner).toBe(true);
+    expect(entries.find((entry) => entry.origin === "global")?.preferredRuntimeOwner).toBe(false);
+    expect(entries.find((entry) => entry.origin === "workspace")?.preferredRuntimeOwner).toBe(
+      false,
+    );
+    expect(entries.find((entry) => entry.origin === "bundled")?.preferredRuntimeOwner).toBe(false);
+  });
+
+  it("records the runtime winner when duplicate plugin ids have no bundled candidate", async () => {
+    const { module } = await loadWithMocks({});
+
+    const entries = module.listChannelCatalogEntries({
+      env: ENV,
+      installRecords: RECORDS,
+      discovery: {
+        candidates: [
+          createChannelCandidate({
+            pluginId: "weixin",
+            idHint: "weixin",
+            origin: "global",
+            rootDir: RECORDS.weixin?.installPath,
+          }),
+          createChannelCandidate({
+            pluginId: "weixin",
+            idHint: "weixin",
+            origin: "workspace",
+            rootDir: "/tmp/workspace-weixin",
+          }),
+        ],
+        diagnostics: [],
+      },
+    });
+
+    expect(entries.find((entry) => entry.origin === "global")?.preferredRuntimeOwner).toBe(true);
+    expect(entries.find((entry) => entry.origin === "workspace")?.preferredRuntimeOwner).toBe(
+      false,
+    );
+  });
+
+  it("marks a bundled candidate as the runtime winner over unrecorded duplicates", async () => {
+    const { module } = await loadWithMocks({
+      loadRecords: () => ({}),
+    });
+
+    const entries = module.listChannelCatalogEntries({
+      env: ENV,
+      discovery: {
+        candidates: [
+          createChannelCandidate({
+            bundledPluginId: "telegram",
+            idHint: "telegram",
+            origin: "bundled",
+            rootDir: "/tmp/bundled-telegram",
+          }),
+          createChannelCandidate({
+            pluginId: "telegram",
+            idHint: "telegram",
+            origin: "workspace",
+            rootDir: "/tmp/workspace-telegram",
+          }),
+          createChannelCandidate({
+            pluginId: "telegram",
+            idHint: "telegram",
+            origin: "global",
+            rootDir: "/tmp/global-telegram",
+          }),
+        ],
+        diagnostics: [],
+      },
+    });
+
+    expect(entries.find((entry) => entry.origin === "bundled")?.preferredRuntimeOwner).toBe(true);
+    expect(entries.find((entry) => entry.origin === "workspace")?.preferredRuntimeOwner).toBe(
+      false,
+    );
+    expect(entries.find((entry) => entry.origin === "global")?.preferredRuntimeOwner).toBe(false);
+  });
+
+  it("ignores an unloadable higher-precedence duplicate when choosing the runtime owner", async () => {
+    const { module } = await loadWithMocks({
+      isCandidateLoadable: (candidate) => candidate.rootDir !== "/tmp/config-incompatible",
+    });
+
+    const entries = module.listChannelCatalogEntries({
+      env: ENV,
+      installRecords: {},
+      discovery: {
+        candidates: [
+          createChannelCandidate({
+            pluginId: "chat-plugin",
+            channelId: "incompatible-chat",
+            origin: "config",
+            rootDir: "/tmp/config-incompatible",
+          }),
+          createChannelCandidate({
+            pluginId: "chat-plugin",
+            channelId: "working-chat",
+            origin: "workspace",
+            rootDir: "/tmp/workspace-working",
+          }),
+        ],
+        diagnostics: [],
+      },
+    });
+
+    expect(entries.find((entry) => entry.origin === "config")?.runtimeOwnerRank).toBeUndefined();
+    expect(entries.find((entry) => entry.origin === "config")?.preferredRuntimeOwner).toBe(false);
+    expect(entries.find((entry) => entry.origin === "workspace")?.preferredRuntimeOwner).toBe(true);
   });
 });

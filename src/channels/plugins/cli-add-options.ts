@@ -5,7 +5,7 @@ import type {
   PluginPackageChannel,
   PluginPackageChannelCliOption,
 } from "../../plugins/manifest.js";
-import { listRawChannelPluginCatalogEntries } from "./catalog.js";
+import { listRawChannelPluginCatalogEntries, type ChannelPluginCatalogEntry } from "./catalog.js";
 
 export type ChannelSetupCliOptionValueMetadata = {
   longFlag: string;
@@ -41,19 +41,38 @@ function channelSetupOptions(channel: PluginPackageChannel): PluginPackageChanne
 
 export function resolveChannelSetupCliOptionMetadata(
   channelId?: string,
-  params: { includeAll?: boolean } = {},
+  params: {
+    includeAll?: boolean;
+    catalogEntries?: readonly ChannelPluginCatalogEntry[];
+    bundledChannels?: readonly PluginPackageChannel[];
+    preferCatalogExact?: boolean;
+  } = {},
 ) {
-  const bundledChannels = listBundledPackageChannelMetadata().toSorted(compareChannels);
-  const catalogChannels = listRawChannelPluginCatalogEntries({
-    excludeWorkspace: true,
-    excludeOrigins: ["bundled"],
-  })
+  const bundledChannels = (params.bundledChannels ?? listBundledPackageChannelMetadata()).toSorted(
+    compareChannels,
+  );
+  const catalogEntries =
+    params.catalogEntries ??
+    listRawChannelPluginCatalogEntries({
+      excludeWorkspace: true,
+      excludeOrigins: ["bundled"],
+    });
+  const catalogChannels = catalogEntries
+    .filter((entry) => entry.origin !== "bundled")
     .flatMap((entry) => (entry.channel ? [entry.channel] : []))
     .toSorted(compareChannels);
   const orderedChannels = [...bundledChannels, ...catalogChannels];
   const normalizedChannelId = channelId?.trim().toLowerCase();
+  const bundledExact = normalizedChannelId
+    ? bundledChannels.find((channel) => channel.id?.toLowerCase() === normalizedChannelId)
+    : undefined;
+  const catalogExact = normalizedChannelId
+    ? catalogChannels.find((channel) => channel.id?.toLowerCase() === normalizedChannelId)
+    : undefined;
   const selectedChannel = normalizedChannelId
-    ? (orderedChannels.find((channel) => channel.id?.toLowerCase() === normalizedChannelId) ??
+    ? ((params.preferCatalogExact
+        ? (catalogExact ?? bundledExact)
+        : (bundledExact ?? catalogExact)) ??
       orderedChannels.find((channel) =>
         channel.aliases?.some((alias) => alias.toLowerCase() === normalizedChannelId),
       ))
@@ -86,5 +105,11 @@ export function resolveChannelSetupCliOptionMetadata(
     }
   }
 
-  return { options, optionCandidates, selectedChannel, valueMetadataByAttributeName };
+  return {
+    options,
+    optionCandidates,
+    selectedChannel,
+    valueMetadataByAttributeName,
+    bundledChannels,
+  };
 }

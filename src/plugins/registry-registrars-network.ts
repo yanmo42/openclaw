@@ -310,6 +310,8 @@ export function createNetworkRegistrars(state: PluginRegistryState) {
       if (existingRuntime.pluginId === record.id) {
         existingRuntime.plugin = plugin;
         existingRuntime.pluginName = record.name;
+        existingRuntime.pluginVersion = record.version;
+        existingRuntime.pluginCandidateVersion = record.candidateVersion;
         existingRuntime.origin = record.origin;
         existingRuntime.source = record.source;
         existingRuntime.rootDir = record.rootDir;
@@ -317,6 +319,8 @@ export function createNetworkRegistrars(state: PluginRegistryState) {
         if (existingSetup) {
           existingSetup.plugin = plugin;
           existingSetup.pluginName = record.name;
+          existingSetup.pluginVersion = record.version;
+          existingSetup.pluginCandidateVersion = record.candidateVersion;
           existingSetup.origin = record.origin;
           existingSetup.source = record.source;
           existingSetup.enabled = record.enabled;
@@ -338,6 +342,8 @@ export function createNetworkRegistrars(state: PluginRegistryState) {
       if (existingSetup.pluginId === record.id) {
         existingSetup.plugin = plugin;
         existingSetup.pluginName = record.name;
+        existingSetup.pluginVersion = record.version;
+        existingSetup.pluginCandidateVersion = record.candidateVersion;
         existingSetup.origin = record.origin;
         existingSetup.source = record.source;
         existingSetup.enabled = record.enabled;
@@ -359,6 +365,8 @@ export function createNetworkRegistrars(state: PluginRegistryState) {
     registry.channelSetups.push({
       pluginId: record.id,
       pluginName: record.name,
+      ...(record.version ? { pluginVersion: record.version } : {}),
+      ...(record.candidateVersion ? { pluginCandidateVersion: record.candidateVersion } : {}),
       plugin,
       origin: record.origin,
       source: record.source,
@@ -371,6 +379,8 @@ export function createNetworkRegistrars(state: PluginRegistryState) {
     registry.channels.push({
       pluginId: record.id,
       pluginName: record.name,
+      ...(record.version ? { pluginVersion: record.version } : {}),
+      ...(record.candidateVersion ? { pluginCandidateVersion: record.candidateVersion } : {}),
       plugin,
       origin: record.origin,
       source: record.source,

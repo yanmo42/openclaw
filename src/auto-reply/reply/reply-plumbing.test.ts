@@ -35,6 +35,17 @@ function createSlackThreadingPlugin(): ChannelPlugin {
   } as ChannelPlugin;
 }
 
+function createTeamsCollisionThreadingPlugin(): ChannelPlugin {
+  return {
+    ...createChannelTestPluginBase({ id: "teams", label: "Exact Teams" }),
+    threading: {
+      buildToolContext: () => ({
+        currentChannelId: "exact-teams-thread",
+      }),
+    },
+  } as ChannelPlugin;
+}
+
 describe("buildThreadingToolContext", () => {
   const cfg = {} as OpenClawConfig;
 
@@ -195,6 +206,92 @@ describe("buildThreadingToolContext", () => {
 
     expect(result.currentChannelId).toBe("C1");
     expect(result.currentThreadTs).toBe("123.456");
+  });
+
+  it("keeps an exact registered channel id ahead of a bundled alias for threading", () => {
+    setActivePluginRegistry(
+      createTestRegistry([
+        {
+          pluginId: "teams",
+          plugin: createTeamsCollisionThreadingPlugin(),
+          source: "test",
+        },
+      ]),
+    );
+
+    const result = buildThreadingToolContext({
+      sessionCtx: {
+        Provider: "teams",
+        To: "team:42",
+      },
+      config: {},
+      hasRepliedRef: undefined,
+    });
+
+    expect(result.currentChannelId).toBe("exact-teams-thread");
+    expect(result.currentChannelProvider).toBe("teams");
+  });
+
+  it("keeps a mixed-case registered channel id ahead of a bundled alias for threading", () => {
+    const mixedCasePlugin = createTeamsCollisionThreadingPlugin();
+    mixedCasePlugin.id = "Teams";
+    setActivePluginRegistry(
+      createTestRegistry([
+        {
+          pluginId: "teams",
+          plugin: mixedCasePlugin,
+          source: "test",
+        },
+      ]),
+    );
+
+    const result = buildThreadingToolContext({
+      sessionCtx: {
+        Provider: "Teams",
+        To: "team:42",
+      },
+      config: {},
+      hasRepliedRef: undefined,
+    });
+
+    expect(result.currentChannelId).toBe("exact-teams-thread");
+    expect(result.currentChannelProvider).toBe("Teams");
+  });
+
+  it("keeps a canonical bundled id ahead of a registered alias for threading", () => {
+    const aliasPlugin = createChannelTestPluginBase({
+      id: "workspace-telegram",
+      label: "Workspace Telegram Alias",
+    });
+    aliasPlugin.meta.aliases = ["telegram"];
+    setActivePluginRegistry(
+      createTestRegistry([
+        {
+          pluginId: "workspace-telegram",
+          plugin: {
+            ...aliasPlugin,
+            threading: {
+              buildToolContext: () => ({
+                currentChannelId: "wrong-alias-thread",
+              }),
+            },
+          } as ChannelPlugin,
+          source: "test",
+        },
+      ]),
+    );
+
+    const result = buildThreadingToolContext({
+      sessionCtx: {
+        Provider: "telegram",
+        To: "telegram:42",
+      },
+      config: {},
+      hasRepliedRef: undefined,
+    });
+
+    expect(result.currentChannelId).toBe("telegram:42");
+    expect(result.currentChannelProvider).toBe("telegram");
   });
 
   it("passes the prepared reply mode to the Slack threading adapter", () => {

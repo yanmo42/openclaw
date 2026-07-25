@@ -1,7 +1,7 @@
 // Message channel normalization helpers canonicalize channel identifiers and aliases.
 import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import { CHANNEL_IDS } from "../channels/ids.js";
-import { listRegisteredChannelPluginIds } from "../channels/registry.js";
+import { listKnownChannelPluginIds } from "../channels/registry.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "./message-channel-constants.js";
 import { normalizeMessageChannel as normalizeMessageChannelCore } from "./message-channel-core.js";
 
@@ -19,7 +19,7 @@ export function normalizeMessageChannel(raw?: string | null): string | undefined
 }
 
 const listPluginChannelIds = (): string[] => {
-  return listRegisteredChannelPluginIds();
+  return listKnownChannelPluginIds();
 };
 
 /** Lists built-in and registered plugin channel ids that can receive delivery. */

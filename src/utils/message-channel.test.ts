@@ -2,8 +2,10 @@
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChannelPlugin } from "../channels/plugins/types.public.js";
+import { clearCurrentPluginMetadataSnapshot } from "../plugins/current-plugin-metadata-snapshot.js";
 import { setActivePluginRegistry } from "../plugins/runtime.js";
 import { createChannelTestPluginBase, createTestRegistry } from "../test-utils/channel-plugins.js";
+import { setCurrentChannelOwnerMetadataForTest } from "../test-utils/plugin-metadata-snapshot.js";
 import {
   isBrowserCopilotClient,
   isBrowserOperatorUiClient,
@@ -55,6 +57,7 @@ describe("message-channel", () => {
 
   afterEach(() => {
     setActivePluginRegistry(emptyRegistry);
+    clearCurrentPluginMetadataSnapshot();
   });
 
   it("normalizes gateway message channels and rejects unknown values", () => {
@@ -90,6 +93,100 @@ describe("message-channel", () => {
       ]),
     );
     expect(resolveGatewayMessageChannel("workspace-chat")).toBe("demo-alias-channel");
+  });
+
+  it("prefers an exact registered channel id over a bundled alias", () => {
+    const msteamsPlugin = createChannelTestPluginBase({
+      id: "msteams",
+      label: "Microsoft Teams",
+      docsPath: "/channels/msteams",
+    });
+    msteamsPlugin.meta.aliases = ["teams"];
+    const workspaceTeamsPlugin = createChannelTestPluginBase({
+      id: "teams",
+      label: "Workspace Teams",
+      docsPath: "/channels/teams",
+    });
+    setActivePluginRegistry(
+      createTestRegistry([
+        { pluginId: "msteams", plugin: msteamsPlugin, source: "test" },
+        { pluginId: "teams", plugin: workspaceTeamsPlugin, source: "test" },
+      ]),
+    );
+
+    expect(resolveGatewayMessageChannel("teams")).toBe("teams");
+  });
+
+  it("preserves a registered channel's mixed-case canonical id", () => {
+    const mixedCasePlugin = createChannelTestPluginBase({
+      id: "CaseChat",
+      label: "Case Chat",
+      docsPath: "/channels/case-chat",
+    });
+    setActivePluginRegistry(
+      createTestRegistry([
+        { pluginId: "case-chat-plugin", plugin: mixedCasePlugin, source: "test" },
+      ]),
+    );
+
+    expect(resolveGatewayMessageChannel("casechat")).toBe("CaseChat");
+  });
+
+  it("preserves an exact manifest channel id over a bundled alias while its plugin is inactive", () => {
+    setCurrentChannelOwnerMetadataForTest({
+      plugins: [{ pluginId: "teams-plugin", enabled: true }],
+      channels: new Map([["teams", ["teams-plugin"]]]),
+    });
+
+    expect(resolveGatewayMessageChannel("teams")).toBe("teams");
+  });
+
+  it("ignores workspace-scoped manifest owners during process-global normalization", () => {
+    setCurrentChannelOwnerMetadataForTest({
+      plugins: [{ pluginId: "teams-plugin", enabled: true }],
+      channels: new Map([["teams", ["teams-plugin"]]]),
+      pluginIds: ["teams-plugin"],
+      workspaceDir: "/tmp/workspace-a",
+    });
+
+    expect(resolveGatewayMessageChannel("teams")).toBe("msteams");
+  });
+
+  it("matches enabled manifest channel ids case-insensitively", () => {
+    setCurrentChannelOwnerMetadataForTest({
+      plugins: [{ pluginId: "teams-plugin", enabled: true }],
+      channels: new Map([["Teams", ["teams-plugin"]]]),
+    });
+
+    expect(resolveGatewayMessageChannel("teams")).toBe("Teams");
+  });
+
+  it("ignores exact channel ids owned only by disabled manifest plugins", () => {
+    setCurrentChannelOwnerMetadataForTest({
+      plugins: [{ pluginId: "teams-plugin", enabled: false }],
+      channels: new Map([["teams", ["teams-plugin"]]]),
+    });
+
+    expect(resolveGatewayMessageChannel("teams")).toBe("msteams");
+  });
+
+  it("does not borrow bundled markdown capability for an inactive manifest-known exact id", () => {
+    setCurrentChannelOwnerMetadataForTest({
+      plugins: [{ pluginId: "workspace-matrix", enabled: true }],
+      channels: new Map([["matrix", ["workspace-matrix"]]]),
+    });
+
+    expect(isMarkdownCapableMessageChannel("matrix")).toBe(false);
+  });
+
+  it("does not borrow bundled markdown capability for a same-id replacement's exact channel", () => {
+    setCurrentChannelOwnerMetadataForTest({
+      plugins: [{ pluginId: "googlechat", enabled: true }],
+      channels: new Map([["gchat", ["googlechat"]]]),
+    });
+
+    expect(resolveGatewayMessageChannel("gchat")).toBe("gchat");
+    expect(isMarkdownCapableMessageChannel("gchat")).toBe(false);
   });
 
   it("recognises internal non-delivery channel sources", () => {
@@ -142,6 +239,23 @@ describe("message-channel", () => {
       ]),
     );
     expect(isMarkdownCapableMessageChannel("demo-markdown-channel")).toBe(true);
+  });
+
+  it("reads markdown capability from the exact registered owner before a bundled alias", () => {
+    setActivePluginRegistry(
+      createTestRegistry([
+        {
+          pluginId: "teams",
+          plugin: createChannelTestPluginBase({
+            id: "teams",
+            markdownCapable: true,
+          }),
+          source: "test",
+        },
+      ]),
+    );
+
+    expect(isMarkdownCapableMessageChannel("teams")).toBe(true);
   });
 
   it("reads Matrix markdown capability from bundled channel catalog metadata", async () => {

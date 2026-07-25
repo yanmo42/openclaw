@@ -9,6 +9,7 @@ import { getResolvedLoggerSettings } from "../../logging.js";
 import { resolveLogFile } from "../../logging/log-tail.js";
 import { parseLogLine } from "../../logging/parse-log-line.js";
 import { listManifestChannelContributionIds } from "../../plugins/manifest-contribution-ids.js";
+import { loadPluginRegistrySnapshot } from "../../plugins/plugin-registry.js";
 import { defaultRuntime, type RuntimeEnv, writeRuntimeJson } from "../../runtime.js";
 
 export type ChannelsLogsOptions = {
@@ -22,39 +23,95 @@ type LogLine = ReturnType<typeof parseLogLine>;
 const DEFAULT_LIMIT = 200;
 const MAX_BYTES = 1_000_000;
 
-function listManifestChannelIds(): Set<string> {
-  return new Set(
+type ChannelLogFilter = {
+  channel: string;
+  knownScopeOwnerIds: Set<string>;
+  matchingScopeOwnerIds: Set<string>;
+};
+
+function resolveManifestLogScopeOwners() {
+  const index = loadPluginRegistrySnapshot({ env: process.env });
+  const channelIds = new Set(
     listManifestChannelContributionIds({
+      index,
       includeDisabled: true,
       env: process.env,
     }),
   );
+  const pluginChannelsByScopeOwnerId = new Map<string, Set<string>>();
+  for (const plugin of index.plugins) {
+    const pluginId = normalizeLowercaseStringOrEmpty(plugin.pluginId);
+    if (pluginId) {
+      pluginChannelsByScopeOwnerId.set(
+        pluginId,
+        new Set(
+          (plugin.contributions?.channels ?? [])
+            .map((channelId) => normalizeLowercaseStringOrEmpty(channelId))
+            .filter(Boolean),
+        ),
+      );
+    }
+  }
+  return { channelIds, pluginChannelsByScopeOwnerId };
 }
 
-function parseChannelFilter(raw?: string) {
+function resolveLogScopeOwnerIds(params: {
+  channel: string;
+  channelIds: Set<string>;
+  pluginChannelsByScopeOwnerId: Map<string, Set<string>>;
+}): { knownScopeOwnerIds: Set<string>; matchingScopeOwnerIds: Set<string> } {
+  const knownScopeOwnerIds = new Set([...params.channelIds, params.channel]);
+  const matchingScopeOwnerIds = new Set([params.channel]);
+  for (const [pluginId, ownedChannelIds] of params.pluginChannelsByScopeOwnerId) {
+    knownScopeOwnerIds.add(pluginId);
+    if (ownedChannelIds.has(params.channel)) {
+      matchingScopeOwnerIds.add(pluginId);
+    }
+  }
+  return { knownScopeOwnerIds, matchingScopeOwnerIds };
+}
+
+function parseChannelFilter(raw?: string): ChannelLogFilter {
   const trimmed = normalizeLowercaseStringOrEmpty(raw);
   if (!trimmed || trimmed === "all") {
-    return "all";
+    return {
+      channel: "all",
+      knownScopeOwnerIds: new Set(),
+      matchingScopeOwnerIds: new Set(),
+    };
   }
+  const { channelIds, pluginChannelsByScopeOwnerId } = resolveManifestLogScopeOwners();
   const bundled = normalizeBundledChannelId(trimmed);
-  if (bundled) {
-    return bundled;
-  }
-  return listManifestChannelIds().has(trimmed) ? trimmed : "all";
+  const channel = bundled === trimmed || channelIds.has(trimmed) ? trimmed : (bundled ?? "all");
+  return {
+    channel,
+    ...resolveLogScopeOwnerIds({ channel, channelIds, pluginChannelsByScopeOwnerId }),
+  };
 }
 
-function matchesChannel(line: NonNullable<LogLine>, channel: string) {
+function matchesChannel(line: NonNullable<LogLine>, filter: ChannelLogFilter) {
+  const { channel, knownScopeOwnerIds, matchingScopeOwnerIds } = filter;
   if (channel === "all") {
     return true;
   }
-  const needle = `gateway/channels/${channel}`;
-  if (line.subsystem?.includes(needle)) {
-    return true;
-  }
-  if (line.module?.includes(channel)) {
-    return true;
-  }
-  return false;
+  const matchesScopeOwner = (segment: string, ownerId: string) =>
+    segment === ownerId || segment.startsWith(`${ownerId}-`) || segment.startsWith(`${ownerId}:`);
+  const matchesChannelToken = (value?: string) =>
+    value?.split("/").some((segment) => {
+      const knownMatches = Array.from(knownScopeOwnerIds).filter((ownerId) =>
+        matchesScopeOwner(segment, ownerId),
+      );
+      if (knownMatches.length === 0) {
+        return false;
+      }
+      // Longest-owner assignment keeps nested plugin IDs such as `foo-tools`
+      // from leaking into the shorter selected `foo` scope.
+      const longestOwnerLength = Math.max(...knownMatches.map((ownerId) => ownerId.length));
+      return knownMatches.some(
+        (ownerId) => ownerId.length === longestOwnerLength && matchingScopeOwnerIds.has(ownerId),
+      );
+    }) ?? false;
+  return matchesChannelToken(line.subsystem) || matchesChannelToken(line.module);
 }
 
 function parseLinesOption(value: unknown): number {
@@ -111,7 +168,8 @@ export async function channelsLogsCommand(
   opts: ChannelsLogsOptions,
   runtime: RuntimeEnv = defaultRuntime,
 ) {
-  const channel = parseChannelFilter(opts.channel);
+  const filter = parseChannelFilter(opts.channel);
+  const channel = filter.channel;
   const limit = parseLinesOption(opts.lines);
 
   const file = await resolveLogFile(getResolvedLoggerSettings().file);
@@ -119,7 +177,7 @@ export async function channelsLogsCommand(
   const parsed = rawLines
     .map(parseLogLine)
     .filter((line): line is NonNullable<LogLine> => Boolean(line));
-  const filtered = parsed.filter((line) => matchesChannel(line, channel));
+  const filtered = parsed.filter((line) => matchesChannel(line, filter));
   const lines = filtered.slice(Math.max(0, filtered.length - limit));
 
   if (opts.json) {

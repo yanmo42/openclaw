@@ -725,22 +725,36 @@ export const ChannelsStatusResultSchema = closedObject({
   warnings: Type.Optional(Type.Array(Type.String())),
 });
 
+// Canonical-ID callers identify the selected plugin candidate so a stale
+// Gateway cannot redirect lifecycle work to an alias or same-id replacement.
 /** Logs out one channel account. */
 export const ChannelsLogoutParamsSchema = closedObject({
   channel: NonEmptyString,
   accountId: Type.Optional(Type.String()),
+  exactChannel: Type.Optional(Type.Boolean()),
+  pluginId: Type.Optional(NonEmptyString),
+  pluginOrigin: Type.Optional(NonEmptyString),
+  pluginCandidateFingerprint: Type.Optional(NonEmptyString),
 });
 
 /** Stops one channel account runtime. */
 export const ChannelsStopParamsSchema = closedObject({
   channel: NonEmptyString,
   accountId: Type.Optional(Type.String()),
+  exactChannel: Type.Optional(Type.Boolean()),
+  pluginId: Type.Optional(NonEmptyString),
+  pluginOrigin: Type.Optional(NonEmptyString),
+  pluginCandidateFingerprint: Type.Optional(NonEmptyString),
 });
 
 /** Starts one channel account runtime. */
 export const ChannelsStartParamsSchema = closedObject({
   channel: NonEmptyString,
   accountId: Type.Optional(Type.String()),
+  exactChannel: Type.Optional(Type.Boolean()),
+  pluginId: Type.Optional(NonEmptyString),
+  pluginOrigin: Type.Optional(NonEmptyString),
+  pluginCandidateFingerprint: Type.Optional(NonEmptyString),
 });
 
 /** Starts browser/web login for a channel account. */

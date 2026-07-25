@@ -874,6 +874,11 @@ describe("setupChannels workspace shadow exclusion", () => {
     expect(promptOrder).toEqual(["channel setup", "channel picker"]);
     expect(confirm).not.toHaveBeenCalled();
     expect(configureInteractive).toHaveBeenCalledTimes(1);
+    expect(select).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initialValue: "__done__",
+      }),
+    );
     expect(result).toEqual({
       channels: { "external-chat": { token: "configured" } },
     });
@@ -934,6 +939,7 @@ describe("setupChannels workspace shadow exclusion", () => {
     expect(promptOrder).toEqual(["channel setup", "channel picker"]);
     expect(select).toHaveBeenCalledWith(
       expect.objectContaining({
+        initialValue: "external-chat",
         message: "Select a channel",
       }),
     );

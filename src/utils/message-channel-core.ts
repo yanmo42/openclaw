@@ -1,6 +1,7 @@
 // Message channel core helpers normalize channel families and internal ids.
 import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
 import { normalizeChatChannelId } from "../channels/ids.js";
+import { resolveKnownChannelPluginId } from "../channels/registry-lookup.js";
 import { normalizeAnyChannelId } from "../channels/registry-normalize.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "./message-channel-constants.js";
 
@@ -20,13 +21,21 @@ export function normalizeMessageChannel(raw?: string | null): string | undefined
   if (normalized === INTERNAL_MESSAGE_CHANNEL) {
     return INTERNAL_MESSAGE_CHANNEL;
   }
+  const registered = normalizeAnyChannelId(normalized);
+  if (registered && normalizeOptionalLowercaseString(registered) === normalized) {
+    return registered;
+  }
+  const exactKnownId = resolveKnownChannelPluginId(normalized);
+  if (exactKnownId) {
+    return exactKnownId;
+  }
   const builtIn = normalizeChatChannelId(normalized);
   if (builtIn) {
     return builtIn;
   }
   // Preserve unknown-but-normalized ids so external plugin channels can route
   // before their full runtime is loaded.
-  return normalizeAnyChannelId(normalized) ?? normalized;
+  return registered ?? normalized;
 }
 
 /** Returns true only when a value is already a normalized, non-internal delivery channel id. */

@@ -12,6 +12,10 @@ const mocks = vi.hoisted(() => ({
   readConfigFileSnapshot: vi.fn(),
   applyPluginAutoEnable: vi.fn(),
   getChannelPlugin: vi.fn(),
+  getLoadedChannelPluginOwnerId: vi.fn(() => "whatsapp"),
+  getLoadedChannelPluginOrigin: vi.fn(() => "bundled"),
+  getLoadedChannelPluginCandidateFingerprint: vi.fn(() => "gateway-candidate"),
+  normalizeChannelId: vi.fn((value: string) => value),
 }));
 
 vi.mock("../../config/config.js", () => ({
@@ -26,7 +30,10 @@ vi.mock("../../config/plugin-auto-enable.js", () => ({
 vi.mock("../../channels/plugins/index.js", () => ({
   listChannelPlugins: vi.fn(),
   getChannelPlugin: mocks.getChannelPlugin,
-  normalizeChannelId: (value: string) => value,
+  getLoadedChannelPluginOwnerId: mocks.getLoadedChannelPluginOwnerId,
+  getLoadedChannelPluginOrigin: mocks.getLoadedChannelPluginOrigin,
+  getLoadedChannelPluginCandidateFingerprint: mocks.getLoadedChannelPluginCandidateFingerprint,
+  normalizeChannelId: mocks.normalizeChannelId,
 }));
 
 import { channelsHandlers } from "./channels.js";
@@ -100,6 +107,10 @@ describe("channelsHandlers channels.start", () => {
     vi.clearAllMocks();
     mocks.getRuntimeConfig.mockReturnValue({});
     mocks.applyPluginAutoEnable.mockImplementation(({ config }) => ({ config, changes: [] }));
+    mocks.getLoadedChannelPluginOwnerId.mockReturnValue("whatsapp");
+    mocks.getLoadedChannelPluginOrigin.mockReturnValue("bundled");
+    mocks.getLoadedChannelPluginCandidateFingerprint.mockReturnValue("gateway-candidate");
+    mocks.normalizeChannelId.mockImplementation((value: string) => value);
     mocks.getChannelPlugin.mockReturnValue({
       id: "whatsapp",
       gateway: { startAccount: vi.fn() },
@@ -137,6 +148,215 @@ describe("channelsHandlers channels.start", () => {
       true,
       {
         channel: "whatsapp",
+        accountId: "default-account",
+        started: false,
+      },
+      undefined,
+    );
+  });
+
+  it("does not alias-fallback an exact channel id that is absent from the running registry", async () => {
+    const startChannel = vi.fn();
+    const respond = vi.fn();
+    mocks.normalizeChannelId.mockImplementation((value: string) =>
+      value === "teams" ? "msteams" : value,
+    );
+    mocks.getChannelPlugin.mockImplementation((channelId: string) =>
+      channelId === "msteams"
+        ? {
+            id: "msteams",
+            gateway: { startAccount: vi.fn() },
+            config: {
+              defaultAccountId: () => "default-account",
+              listAccountIds: () => ["default-account"],
+              resolveAccount: () => ({}),
+            },
+          }
+        : undefined,
+    );
+
+    await expectDefined(
+      channelsHandlers["channels.start"],
+      'channelsHandlers["channels.start"] test invariant',
+    )(
+      createOptions(
+        { channel: "teams", exactChannel: true },
+        {
+          respond,
+          context: {
+            getRuntimeConfig: mocks.getRuntimeConfig,
+            startChannel,
+            getRuntimeSnapshot: vi.fn(() => createChannelRuntimeSnapshot(false)),
+          } as unknown as GatewayRequestHandlerOptions["context"],
+        },
+      ),
+    );
+
+    expect(startChannel).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({
+        code: "INVALID_REQUEST",
+        message: "invalid channels.start channel",
+      }),
+    );
+  });
+
+  it("rejects an exact channel whose loaded plugin owner differs from the caller", async () => {
+    const startChannel = vi.fn();
+    const respond = vi.fn();
+
+    await expectDefined(
+      channelsHandlers["channels.start"],
+      'channelsHandlers["channels.start"] test invariant',
+    )(
+      createOptions(
+        {
+          channel: "whatsapp",
+          exactChannel: true,
+          pluginId: "workspace-whatsapp",
+        },
+        {
+          respond,
+          context: {
+            getRuntimeConfig: mocks.getRuntimeConfig,
+            startChannel,
+            getRuntimeSnapshot: vi.fn(() => createChannelRuntimeSnapshot(false)),
+          } as unknown as GatewayRequestHandlerOptions["context"],
+        },
+      ),
+    );
+
+    expect(startChannel).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({
+        code: "INVALID_REQUEST",
+        message: "invalid channels.start plugin owner",
+      }),
+    );
+  });
+
+  it("rejects an exact same-id channel loaded from different plugin provenance", async () => {
+    const startChannel = vi.fn();
+    const respond = vi.fn();
+
+    await expectDefined(
+      channelsHandlers["channels.start"],
+      'channelsHandlers["channels.start"] test invariant',
+    )(
+      createOptions(
+        {
+          channel: "whatsapp",
+          exactChannel: true,
+          pluginId: "whatsapp",
+          pluginOrigin: "global",
+        },
+        {
+          respond,
+          context: {
+            getRuntimeConfig: mocks.getRuntimeConfig,
+            startChannel,
+            getRuntimeSnapshot: vi.fn(() => createChannelRuntimeSnapshot(false)),
+          } as unknown as GatewayRequestHandlerOptions["context"],
+        },
+      ),
+    );
+
+    expect(startChannel).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({
+        code: "INVALID_REQUEST",
+        message: "invalid channels.start plugin owner",
+      }),
+    );
+  });
+
+  it("rejects an exact same-id channel loaded from a different plugin candidate", async () => {
+    const startChannel = vi.fn();
+    const respond = vi.fn();
+
+    await expectDefined(
+      channelsHandlers["channels.start"],
+      'channelsHandlers["channels.start"] test invariant',
+    )(
+      createOptions(
+        {
+          channel: "whatsapp",
+          exactChannel: true,
+          pluginId: "whatsapp",
+          pluginOrigin: "bundled",
+          pluginCandidateFingerprint: "cli-candidate",
+        },
+        {
+          respond,
+          context: {
+            getRuntimeConfig: mocks.getRuntimeConfig,
+            startChannel,
+            getRuntimeSnapshot: vi.fn(() => createChannelRuntimeSnapshot(false)),
+          } as unknown as GatewayRequestHandlerOptions["context"],
+        },
+      ),
+    );
+
+    expect(startChannel).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({
+        code: "INVALID_REQUEST",
+        message: "invalid channels.start plugin owner",
+      }),
+    );
+  });
+
+  it("preserves a mixed-case canonical id for exact lifecycle requests", async () => {
+    const startChannel = vi.fn();
+    const respond = vi.fn();
+    const mixedCasePlugin = {
+      id: "CaseChat",
+      gateway: { startAccount: vi.fn() },
+      config: {
+        defaultAccountId: () => "default-account",
+        listAccountIds: () => ["default-account"],
+        resolveAccount: () => ({}),
+      },
+    };
+    mocks.getChannelPlugin.mockImplementation((channelId: string) =>
+      channelId === "CaseChat" ? mixedCasePlugin : undefined,
+    );
+    mocks.getLoadedChannelPluginOwnerId.mockReturnValue("case-chat-plugin");
+
+    await expectDefined(
+      channelsHandlers["channels.start"],
+      'channelsHandlers["channels.start"] test invariant',
+    )(
+      createOptions(
+        {
+          channel: "CaseChat",
+          exactChannel: true,
+          pluginId: "case-chat-plugin",
+        },
+        {
+          respond,
+          context: {
+            getRuntimeConfig: mocks.getRuntimeConfig,
+            startChannel,
+            getRuntimeSnapshot: vi.fn(() => createChannelRuntimeSnapshot(false)),
+          } as unknown as GatewayRequestHandlerOptions["context"],
+        },
+      ),
+    );
+
+    expect(startChannel).toHaveBeenCalledWith("CaseChat", "default-account", { manual: true });
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      {
+        channel: "CaseChat",
         accountId: "default-account",
         started: false,
       },
@@ -201,6 +421,34 @@ describe("channelsHandlers channels.stop", () => {
         stopped: true,
       },
       undefined,
+    );
+  });
+
+  it("does not stop a same-id channel owned by another plugin", async () => {
+    const stopChannel = vi.fn();
+    const respond = vi.fn();
+
+    await expectDefined(
+      channelsHandlers["channels.stop"],
+      'channelsHandlers["channels.stop"] test invariant',
+    )(
+      createOptions(
+        { channel: "whatsapp", exactChannel: true, pluginId: "workspace-whatsapp" },
+        {
+          respond,
+          context: {
+            getRuntimeConfig: mocks.getRuntimeConfig,
+            stopChannel,
+          } as unknown as GatewayRequestHandlerOptions["context"],
+        },
+      ),
+    );
+
+    expect(stopChannel).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({ message: "invalid channels.stop plugin owner" }),
     );
   });
 });
@@ -276,6 +524,37 @@ describe("channelsHandlers channels.logout", () => {
         loggedOut: true,
       },
       undefined,
+    );
+  });
+
+  it("does not log out a same-id channel owned by another plugin", async () => {
+    const logoutAccount = vi.fn();
+    const respond = vi.fn();
+    mocks.getChannelPlugin.mockReturnValue({
+      id: "whatsapp",
+      gateway: { logoutAccount },
+      config: {
+        defaultAccountId: () => "default-account",
+        listAccountIds: () => ["default-account"],
+        resolveAccount: () => ({}),
+      },
+    });
+
+    await expectDefined(
+      channelsHandlers["channels.logout"],
+      'channelsHandlers["channels.logout"] test invariant',
+    )(
+      createOptions(
+        { channel: "whatsapp", exactChannel: true, pluginId: "workspace-whatsapp" },
+        { respond },
+      ),
+    );
+
+    expect(logoutAccount).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({ message: "invalid channels.logout plugin owner" }),
     );
   });
 });

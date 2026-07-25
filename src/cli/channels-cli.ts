@@ -2,6 +2,7 @@
 import type { Command } from "commander";
 import { formatDocsLink } from "../../packages/terminal-core/src/links.js";
 import { theme } from "../../packages/terminal-core/src/theme.js";
+import type { ChannelSetupCliOptionValueMetadata } from "../channels/plugins/cli-add-options.js";
 import { danger } from "../globals.js";
 import { defaultRuntime } from "../runtime.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
@@ -35,6 +36,11 @@ type AddChannelSetupOptionsParams = {
 };
 
 type ChannelSetupOptionMode = "none" | "modern" | "legacy";
+type ChannelSetupOptionsRegistration = {
+  mode: ChannelSetupOptionMode;
+  valueMetadataByAttributeName: ReadonlyMap<string, ChannelSetupCliOptionValueMetadata>;
+  valueMetadataAuthoritative: boolean;
+};
 const LEGACY_CHANNEL_SETUP_OPTIONS: readonly ChannelSetupCliOption[] = [
   { flags: "--token <token>", description: "Channel token or credential payload" },
   {
@@ -118,12 +124,52 @@ function shouldRegisterChannelSetupOptions(
 async function addChannelSetupOptions(
   command: Command,
   params: AddChannelSetupOptionsParams = {},
-): Promise<ChannelSetupOptionMode> {
+): Promise<ChannelSetupOptionsRegistration> {
   const { resolveChannelSetupCliOptionMetadata } = await loadChannelSetupCliOptions();
   const selected = params.channelId?.trim().toLowerCase();
-  const { options, selectedChannel } = resolveChannelSetupCliOptionMetadata(selected, {
+  let metadata = resolveChannelSetupCliOptionMetadata(selected, {
     includeAll: params.includeAll,
   });
+  let valueMetadataAuthoritative = false;
+  if (selected) {
+    const [{ readBestEffortConfig }, agentScope, trustedCatalog] = await Promise.all([
+      import("../config/config.js"),
+      import("../agents/agent-scope.js"),
+      import("../commands/channel-setup/trusted-catalog.js"),
+    ]);
+    const cfg = await readBestEffortConfig();
+    const workspaceDir = agentScope.resolveAgentWorkspaceDir(
+      cfg,
+      agentScope.resolveDefaultAgentId(cfg),
+    );
+    // The fast metadata path excludes workspace plugins. Re-resolve through the
+    // trusted catalog so parsing and runtime select the same owner, including exact-id shadows.
+    const trustedCatalogEntries = trustedCatalog.listTrustedChannelPluginCatalogEntries({
+      cfg,
+      workspaceDir,
+    });
+    const exactCatalogEntry = trustedCatalogEntries.find(
+      (entry) => entry.id.trim().toLowerCase() === selected,
+    );
+    const catalogOwnsExactSelection =
+      exactCatalogEntry?.preferredRuntimeOwner ??
+      (exactCatalogEntry?.origin === "config" || exactCatalogEntry?.origin === "workspace");
+    const trustedMetadata = resolveChannelSetupCliOptionMetadata(selected, {
+      includeAll: params.includeAll,
+      bundledChannels: metadata.bundledChannels,
+      catalogEntries: trustedCatalogEntries,
+      // Duplicate candidates carry the shared runtime precedence decision.
+      // Non-duplicates keep the normal config/workspace catalog precedence.
+      preferCatalogExact: catalogOwnsExactSelection,
+    });
+    if (trustedMetadata.selectedChannel) {
+      metadata = trustedMetadata;
+      valueMetadataAuthoritative =
+        exactCatalogEntry?.channel !== undefined &&
+        trustedMetadata.selectedChannel === exactCatalogEntry.channel;
+    }
+  }
+  const { options, selectedChannel } = metadata;
   const mode: ChannelSetupOptionMode = selected
     ? selectedChannel?.setup
       ? "modern"
@@ -143,7 +189,11 @@ async function addChannelSetupOptions(
       addChannelSetupOption(command, option, seenFlags);
     }
   }
-  return mode;
+  return {
+    mode,
+    valueMetadataByAttributeName: metadata.valueMetadataByAttributeName,
+    valueMetadataAuthoritative,
+  };
 }
 
 export async function registerChannelsCli(
@@ -309,15 +359,26 @@ export async function registerChannelsCli(
     .option("--name <name>", "Display name for this account");
 
   let channelSetupOptionMode: ChannelSetupOptionMode = "none";
+  let channelSetupValueMetadata:
+    | ReadonlyMap<string, ChannelSetupCliOptionValueMetadata>
+    | undefined;
   const selectedChannelId = await resolveChannelsAddChannelFromArgv(argv);
   if (
     shouldRegisterChannelSetupOptions(argv, options) &&
     (selectedChannelId !== undefined || options.includeSetupOptions)
   ) {
-    channelSetupOptionMode = await addChannelSetupOptions(addCommand, {
+    const registration = await addChannelSetupOptions(addCommand, {
       channelId: selectedChannelId,
       includeAll: options.includeSetupOptions,
     });
+    channelSetupOptionMode = registration.mode;
+    if (
+      registration.mode === "legacy" &&
+      (registration.valueMetadataAuthoritative ||
+        registration.valueMetadataByAttributeName.size > 0)
+    ) {
+      channelSetupValueMetadata = registration.valueMetadataByAttributeName;
+    }
   }
 
   addCommand.action(async (channelArg: string | undefined, opts, command) => {
@@ -337,6 +398,9 @@ export async function registerChannelsCli(
         {
           hasFlags,
           ...(!hasFlags ? { directEntry: true } : {}),
+          ...(channelSetupValueMetadata
+            ? { setupValueMetadataByAttributeName: channelSetupValueMetadata }
+            : {}),
         },
       );
     });

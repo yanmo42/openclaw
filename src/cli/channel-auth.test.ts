@@ -1,5 +1,5 @@
 // Channel auth CLI tests cover channel auth command routing and credential prompts.
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runChannelLogin, runChannelLogout } from "./channel-auth.js";
 
 const mocks = vi.hoisted(() => ({
@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({
   listChannelPluginCatalogEntries: vi.fn(),
   resolveChannelDefaultAccountId: vi.fn(),
   getChannelPlugin: vi.fn(),
+  getLoadedChannelPluginCandidateFingerprint: vi.fn(),
+  getLoadedChannelPluginOwnerId: vi.fn(),
+  getLoadedChannelPluginOrigin: vi.fn(),
   listChannelPlugins: vi.fn(),
   normalizeChannelId: vi.fn(),
   loadConfig: vi.fn(),
@@ -42,6 +45,9 @@ vi.mock("../channels/plugins/helpers.js", () => ({
 
 vi.mock("../channels/plugins/index.js", () => ({
   getChannelPlugin: mocks.getChannelPlugin,
+  getLoadedChannelPluginCandidateFingerprint: mocks.getLoadedChannelPluginCandidateFingerprint,
+  getLoadedChannelPluginOwnerId: mocks.getLoadedChannelPluginOwnerId,
+  getLoadedChannelPluginOrigin: mocks.getLoadedChannelPluginOrigin,
   listChannelPlugins: mocks.listChannelPlugins,
   normalizeChannelId: mocks.normalizeChannelId,
 }));
@@ -137,6 +143,8 @@ describe("channel-auth", () => {
     vi.clearAllMocks();
     mocks.normalizeChannelId.mockReturnValue("whatsapp");
     mocks.getChannelPlugin.mockReturnValue(plugin);
+    mocks.getLoadedChannelPluginCandidateFingerprint.mockReturnValue(undefined);
+    mocks.getLoadedChannelPluginOrigin.mockReturnValue(undefined);
     mocks.getChannelPluginCatalogEntry.mockReturnValue(undefined);
     mocks.listChannelPluginCatalogEntries.mockReturnValue([]);
     mocks.loadConfig.mockReturnValue({ channels: { whatsapp: {} } });
@@ -202,6 +210,10 @@ describe("channel-auth", () => {
     mocks.logoutAccount.mockResolvedValue(undefined);
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("runs login with explicit trimmed account and verbose flag", async () => {
     await runChannelLogin({ channel: "wa", account: "  acct-1  ", verbose: true }, runtime);
 
@@ -220,11 +232,69 @@ describe("channel-auth", () => {
       params: {
         channel: "whatsapp",
         accountId: "acct-1",
+        exactChannel: true,
+        pluginId: "whatsapp",
+        pluginOrigin: "bundled",
       },
       mode: "backend",
       clientName: "gateway-client",
       deviceIdentity: null,
     });
+  });
+
+  it("requests exact matching for every resolved login channel id", async () => {
+    await runChannelLogin({ channel: "teams", account: "acct-1" }, runtime);
+
+    expect(mocks.callGateway).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "channels.start",
+        params: {
+          channel: "whatsapp",
+          accountId: "acct-1",
+          exactChannel: true,
+          pluginId: "whatsapp",
+          pluginOrigin: "bundled",
+        },
+      }),
+    );
+  });
+
+  it("sends the selected plugin provenance with lifecycle requests", async () => {
+    mocks.getLoadedChannelPluginOrigin.mockReturnValue("global");
+    mocks.getLoadedChannelPluginCandidateFingerprint.mockReturnValue("candidate-fingerprint");
+
+    await runChannelLogin({ channel: "whatsapp", account: "acct-1" }, runtime);
+
+    expect(mocks.callGateway).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "channels.start",
+        params: {
+          channel: "whatsapp",
+          accountId: "acct-1",
+          exactChannel: true,
+          pluginId: "whatsapp",
+          pluginOrigin: "global",
+          pluginCandidateFingerprint: "candidate-fingerprint",
+        },
+      }),
+    );
+  });
+
+  it("omits host-local provenance and remote restart for a URL-overridden login target", async () => {
+    vi.stubEnv("OPENCLAW_GATEWAY_URL", "wss://remote-gateway.example/ws");
+    mocks.getLoadedChannelPluginOrigin.mockReturnValue("global");
+    mocks.getLoadedChannelPluginCandidateFingerprint.mockReturnValue("local-path-fingerprint");
+    mocks.callGateway.mockRejectedValueOnce(
+      gatewayRequestError("invalid channels.start plugin owner", "INVALID_REQUEST"),
+    );
+
+    await runChannelLogin({ channel: "whatsapp", account: "acct-1" }, runtime);
+
+    expect(mocks.callGateway).toHaveBeenCalledTimes(1);
+    const request = readFirstCallArg(mocks.callGateway);
+    expect(request.params).not.toHaveProperty("pluginOrigin");
+    expect(request.params).not.toHaveProperty("pluginCandidateFingerprint");
+    expect(readFirstLogMessage(runtime)).toContain("running gateway did not restart it");
   });
 
   it("skips gateway runtime reconcile in remote mode and warns without failing login", async () => {
@@ -267,6 +337,30 @@ describe("channel-auth", () => {
         method: "channels.start",
       }),
     );
+    expect(mocks.callGateway).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        method: "gateway.restart.request",
+        params: { reason: "channel login: load whatsapp" },
+      }),
+    );
+    expect(readFirstLogMessage(runtime)).toContain("Gateway restart requested to load whatsapp");
+  });
+
+  it.each([
+    [
+      "a pre-upgrade gateway rejects ownership fields",
+      "invalid channels.start params: at root: unexpected property 'exactChannel'",
+    ],
+    ["the gateway has a different same-id plugin owner", "invalid channels.start plugin owner"],
+  ])("requests gateway restart when %s", async (_case, message) => {
+    mocks.callGateway
+      .mockRejectedValueOnce(gatewayRequestError(message, "INVALID_REQUEST"))
+      .mockResolvedValueOnce(undefined);
+
+    await runChannelLogin({ channel: "whatsapp", account: "acct-1" }, runtime);
+
+    expect(mocks.callGateway).toHaveBeenCalledTimes(2);
     expect(mocks.callGateway).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
@@ -618,6 +712,9 @@ describe("channel-auth", () => {
       params: {
         channel: "whatsapp",
         accountId: "acct-2",
+        exactChannel: true,
+        pluginId: "whatsapp",
+        pluginOrigin: "bundled",
       },
       mode: "backend",
       clientName: "gateway-client",
@@ -626,6 +723,23 @@ describe("channel-auth", () => {
     expect(mocks.resolveAccount).not.toHaveBeenCalled();
     expect(mocks.logoutAccount).not.toHaveBeenCalled();
     expect(mocks.setVerbose).not.toHaveBeenCalled();
+  });
+
+  it("requests exact matching for every resolved logout channel id", async () => {
+    await runChannelLogout({ channel: "teams", account: "acct-2" }, runtime);
+
+    expect(mocks.callGateway).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "channels.logout",
+        params: {
+          channel: "whatsapp",
+          accountId: "acct-2",
+          exactChannel: true,
+          pluginId: "whatsapp",
+          pluginOrigin: "bundled",
+        },
+      }),
+    );
   });
 
   it("falls back to local auth cleanup when a local gateway logout is unreachable", async () => {
@@ -644,6 +758,77 @@ describe("channel-auth", () => {
       "running gateway did not stop it: gateway unreachable",
     );
     expect(mocks.setVerbose).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "a pre-upgrade gateway rejects ownership fields",
+      "invalid channels.logout params: at root: unexpected property 'exactChannel'",
+    ],
+    ["the gateway has a different same-id plugin owner", "invalid channels.logout plugin owner"],
+  ])("restarts and aborts logout when %s", async (_case, message) => {
+    mocks.callGateway
+      .mockRejectedValueOnce(gatewayRequestError(message, "INVALID_REQUEST"))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(
+      runChannelLogout({ channel: "whatsapp", account: "acct-2" }, runtime),
+    ).rejects.toThrow("Gateway restart requested; retry channel logout");
+
+    expect(mocks.callGateway).toHaveBeenCalledTimes(2);
+    expect(mocks.callGateway).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        method: "gateway.restart.request",
+        params: { reason: "channel logout: load whatsapp" },
+      }),
+    );
+    expect(mocks.logoutAccount).not.toHaveBeenCalled();
+  });
+
+  it("does not restart a remote gateway that rejects exact logout matching", async () => {
+    mocks.getLoadedChannelPluginCandidateFingerprint.mockReturnValue("local-path-fingerprint");
+    mocks.loadConfig.mockReturnValue({
+      gateway: {
+        mode: "remote",
+        remote: { url: "wss://remote-gateway.example/ws" },
+      },
+      channels: { whatsapp: {} },
+    });
+    mocks.callGateway.mockRejectedValueOnce(
+      gatewayRequestError(
+        "invalid channels.logout params: at root: unexpected property 'exactChannel'",
+        "INVALID_REQUEST",
+      ),
+    );
+
+    await expect(
+      runChannelLogout({ channel: "teams", account: "acct-2" }, runtime),
+    ).rejects.toThrow("Remote Gateway could not verify channel plugin ownership");
+
+    expect(mocks.callGateway).toHaveBeenCalledTimes(1);
+    const request = readFirstCallArg(mocks.callGateway);
+    expect(request.params).not.toHaveProperty("pluginOrigin");
+    expect(request.params).not.toHaveProperty("pluginCandidateFingerprint");
+    expect(mocks.logoutAccount).not.toHaveBeenCalled();
+  });
+
+  it("treats a URL-overridden logout target as remote", async () => {
+    vi.stubEnv("OPENCLAW_GATEWAY_URL", "wss://remote-gateway.example/ws");
+    mocks.getLoadedChannelPluginCandidateFingerprint.mockReturnValue("local-path-fingerprint");
+    mocks.callGateway.mockRejectedValueOnce(
+      gatewayRequestError("invalid channels.logout plugin owner", "INVALID_REQUEST"),
+    );
+
+    await expect(
+      runChannelLogout({ channel: "whatsapp", account: "acct-2" }, runtime),
+    ).rejects.toThrow("Remote Gateway could not verify channel plugin ownership");
+
+    expect(mocks.callGateway).toHaveBeenCalledTimes(1);
+    const request = readFirstCallArg(mocks.callGateway);
+    expect(request.params).not.toHaveProperty("pluginOrigin");
+    expect(request.params).not.toHaveProperty("pluginCandidateFingerprint");
+    expect(mocks.logoutAccount).not.toHaveBeenCalled();
   });
 
   it("throws when channel does not support logout", async () => {

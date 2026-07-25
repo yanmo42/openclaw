@@ -55,6 +55,42 @@ function buildChannelSetupFlagArityMap(
   return arityBySwitch;
 }
 
+function mergeChannelSetupFlagArities(
+  left: ChannelSetupFlagArity | undefined,
+  right: ChannelSetupFlagArity | undefined,
+): ChannelSetupFlagArity | undefined {
+  if (left === undefined) {
+    return right;
+  }
+  if (right === undefined) {
+    return left;
+  }
+  return left === right ? left : "conflict";
+}
+
+async function buildTrustedChannelSetupFlagArityMap(): Promise<Map<string, ChannelSetupFlagArity>> {
+  const [{ readBestEffortConfig }, agentScope, trustedCatalog, setupOptions] = await Promise.all([
+    import("../config/config.js"),
+    import("../agents/agent-scope.js"),
+    import("../commands/channel-setup/trusted-catalog.js"),
+    loadChannelSetupCliOptions(),
+  ]);
+  const cfg = await readBestEffortConfig();
+  const workspaceDir = agentScope.resolveAgentWorkspaceDir(
+    cfg,
+    agentScope.resolveDefaultAgentId(cfg),
+  );
+  const { optionCandidates } = setupOptions.resolveChannelSetupCliOptionMetadata(undefined, {
+    includeAll: true,
+    bundledChannels: [],
+    catalogEntries: trustedCatalog.listTrustedChannelPluginCatalogEntries({
+      cfg,
+      workspaceDir,
+    }),
+  });
+  return buildChannelSetupFlagArityMap(optionCandidates);
+}
+
 export async function resolveChannelsAddChannelFromArgv(
   argv: string[],
 ): Promise<string | undefined> {
@@ -88,6 +124,7 @@ export async function resolveChannelsAddChannelFromArgv(
   }
 
   let channelFlagArities: Map<string, ChannelSetupFlagArity> | undefined;
+  let trustedChannelFlagArities: Map<string, ChannelSetupFlagArity> | undefined;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (!arg || arg === "--") {
@@ -116,7 +153,11 @@ export async function resolveChannelsAddChannelFromArgv(
       }
       const equalsIndex = arg.indexOf("=");
       const optionSwitch = equalsIndex === -1 ? arg : arg.slice(0, equalsIndex);
-      const arity = channelFlagArities.get(optionSwitch);
+      trustedChannelFlagArities ??= await buildTrustedChannelSetupFlagArityMap();
+      const arity = mergeChannelSetupFlagArities(
+        channelFlagArities.get(optionSwitch),
+        trustedChannelFlagArities.get(optionSwitch),
+      );
       if (!arity || arity === "conflict") {
         return undefined;
       }

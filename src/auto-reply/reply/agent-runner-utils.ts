@@ -143,7 +143,11 @@ export function buildThreadingToolContext(params: {
       currentSourceTurnId,
     };
   }
-  const provider = normalizeChannelId(rawProvider) ?? normalizeAnyChannelId(rawProvider);
+  const registeredProvider = normalizeAnyChannelId(rawProvider);
+  const provider =
+    normalizeOptionalLowercaseString(registeredProvider) === rawProvider
+      ? registeredProvider
+      : (normalizeChannelId(rawProvider) ?? registeredProvider);
   // Fallback for unrecognized/plugin channels (e.g., iMessage before plugin registry init)
   const threading = provider ? getChannelPlugin(provider)?.threading : undefined;
   if (!threading?.buildToolContext) {

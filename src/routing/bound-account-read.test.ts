@@ -1,7 +1,11 @@
 // Bound account read tests cover reading account bindings from channel metadata.
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { AgentRouteBinding } from "../config/types.agents.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { clearCurrentPluginMetadataSnapshot } from "../plugins/current-plugin-metadata-snapshot.js";
+import { setActivePluginRegistry } from "../plugins/runtime.js";
+import { createChannelTestPluginBase, createTestRegistry } from "../test-utils/channel-plugins.js";
+import { setCurrentChannelOwnerMetadataForTest } from "../test-utils/plugin-metadata-snapshot.js";
 import { resolveFirstBoundAccountId } from "./bound-account-read.js";
 
 function cfgWithBindings(bindings: AgentRouteBinding[]): OpenClawConfig {
@@ -9,6 +13,71 @@ function cfgWithBindings(bindings: AgentRouteBinding[]): OpenClawConfig {
 }
 
 describe("resolveFirstBoundAccountId", () => {
+  afterEach(() => {
+    setActivePluginRegistry(createTestRegistry());
+    clearCurrentPluginMetadataSnapshot();
+  });
+
+  it("keeps exact registered channel bindings distinct from bundled aliases", () => {
+    setActivePluginRegistry(
+      createTestRegistry([
+        {
+          pluginId: "teams",
+          plugin: createChannelTestPluginBase({ id: "teams" }),
+          source: "test",
+        },
+      ]),
+    );
+    const cfg = cfgWithBindings([
+      {
+        type: "route",
+        agentId: "bot-alpha",
+        match: { channel: "msteams", accountId: "bundled-account" },
+      },
+      {
+        type: "route",
+        agentId: "bot-alpha",
+        match: { channel: "teams", accountId: "exact-account" },
+      },
+    ]);
+
+    expect(
+      resolveFirstBoundAccountId({
+        cfg,
+        channelId: "teams",
+        agentId: "bot-alpha",
+      }),
+    ).toBe("exact-account");
+  });
+
+  it("keeps exact manifest channel bindings distinct while their plugin is inactive", () => {
+    setActivePluginRegistry(createTestRegistry());
+    setCurrentChannelOwnerMetadataForTest({
+      plugins: [{ pluginId: "teams-plugin", enabled: true }],
+      channels: new Map([["teams", ["teams-plugin"]]]),
+    });
+    const cfg = cfgWithBindings([
+      {
+        type: "route",
+        agentId: "bot-alpha",
+        match: { channel: "msteams", accountId: "bundled-account" },
+      },
+      {
+        type: "route",
+        agentId: "bot-alpha",
+        match: { channel: "teams", accountId: "exact-account" },
+      },
+    ]);
+
+    expect(
+      resolveFirstBoundAccountId({
+        cfg,
+        channelId: "teams",
+        agentId: "bot-alpha",
+      }),
+    ).toBe("exact-account");
+  });
+
   it("returns exact peer match when caller supplies a matching peerId", () => {
     const cfg = cfgWithBindings([
       {

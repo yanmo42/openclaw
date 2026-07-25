@@ -1,6 +1,8 @@
 // Binding scope helpers normalize route binding scope values.
 import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import { normalizeChatChannelId } from "../channels/ids.js";
+import { resolveKnownChannelPluginId } from "../channels/registry-lookup.js";
+import { normalizeAnyChannelId } from "../channels/registry-normalize.js";
 import type { AgentRouteBinding } from "../config/types.agents.js";
 import { normalizeAccountId, normalizeAgentId } from "./session-key.js";
 
@@ -40,12 +42,19 @@ export function normalizeRouteBindingRoles(value: string[] | null | undefined): 
 }
 
 export function normalizeRouteBindingChannelId(raw?: string | null): string | null {
-  const normalized = normalizeChatChannelId(raw);
-  if (normalized) {
-    return normalized;
+  const normalized = normalizeLowercaseStringOrEmpty(raw);
+  if (!normalized) {
+    return null;
   }
-  const fallback = normalizeLowercaseStringOrEmpty(raw);
-  return fallback || null;
+  const registered = normalizeAnyChannelId(normalized);
+  if (registered && registered.toLowerCase() === normalized) {
+    return registered;
+  }
+  const exactKnownId = resolveKnownChannelPluginId(normalized);
+  if (exactKnownId) {
+    return exactKnownId;
+  }
+  return normalizeChatChannelId(normalized) ?? registered ?? normalized;
 }
 
 // Convert a binding match into the same canonical ids used by session routing.

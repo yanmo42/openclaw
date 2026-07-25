@@ -6,7 +6,10 @@ import { getBundledChannelSetupPlugin } from "../channels/plugins/bundled.js";
 import { resolveChannelDefaultAccountId } from "../channels/plugins/helpers.js";
 import { getLoadedChannelPlugin } from "../channels/plugins/index.js";
 import type { ChannelId } from "../channels/plugins/types.public.js";
-import { normalizeChannelId as normalizeBundledChannelId } from "../channels/registry.js";
+import {
+  normalizeAnyChannelId,
+  normalizeChannelId as normalizeBundledChannelId,
+} from "../channels/registry.js";
 import { formatUnknownChannelMessage } from "../cli/error-format.js";
 import { isRouteBinding, listRouteBindings } from "../config/bindings.js";
 import type { AgentRouteBinding } from "../config/types.js";
@@ -219,10 +222,13 @@ function resolveDefaultAccountId(cfg: OpenClawConfig, provider: ChannelId): stri
   return resolveChannelDefaultAccountId({ plugin, cfg });
 }
 
-function listManifestChannelIds(config: OpenClawConfig): Set<string> {
+function listManifestChannelIds(
+  config: OpenClawConfig,
+  includeDisabledManifestChannels: boolean,
+): Set<string> {
   return new Set(
     listManifestChannelContributionIds({
-      includeDisabled: true,
+      includeDisabled: includeDisabledManifestChannels,
       config,
       env: process.env,
     }),
@@ -232,16 +238,20 @@ function listManifestChannelIds(config: OpenClawConfig): Set<string> {
 function normalizeBindingChannelId(
   raw: string | undefined,
   config: OpenClawConfig,
+  includeDisabledManifestChannels: boolean,
 ): ChannelId | null {
-  const bundled = normalizeBundledChannelId(raw);
-  if (bundled) {
-    return bundled;
-  }
   const normalized = normalizeOptionalString(raw)?.toLowerCase();
   if (!normalized) {
     return null;
   }
-  return listManifestChannelIds(config).has(normalized) ? normalized : null;
+  const registered = normalizeAnyChannelId(normalized);
+  if (normalizeOptionalString(registered)?.toLowerCase() === normalized) {
+    return registered;
+  }
+  if (listManifestChannelIds(config, includeDisabledManifestChannels).has(normalized)) {
+    return normalized;
+  }
+  return normalizeBundledChannelId(normalized);
 }
 
 function getBindingChannelPlugin(channel: ChannelId) {
@@ -307,6 +317,7 @@ export function parseBindingSpecs(params: {
   agentId: string;
   specs?: string[];
   config: OpenClawConfig;
+  includeDisabledManifestChannels?: boolean;
 }): { bindings: AgentRouteBinding[]; errors: string[] } {
   const bindings: AgentRouteBinding[] = [];
   const errors: string[] = [];
@@ -326,7 +337,11 @@ export function parseBindingSpecs(params: {
       );
       continue;
     }
-    const channel = normalizeBindingChannelId(channelRaw, params.config);
+    const channel = normalizeBindingChannelId(
+      channelRaw,
+      params.config,
+      params.includeDisabledManifestChannels === true,
+    );
     if (!channel) {
       errors.push(
         formatUnknownChannelMessage({

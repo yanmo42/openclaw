@@ -7,7 +7,14 @@ import { setLoggerOverride } from "../logging.js";
 import { createTestRuntime } from "./test-runtime-config-helpers.js";
 
 const pluginRegistryMocks = vi.hoisted(() => ({
-  loadPluginRegistrySnapshot: vi.fn(() => ({ plugins: [] })),
+  loadPluginRegistrySnapshot: vi.fn(() => ({
+    plugins: [
+      {
+        pluginId: "teams-meetings",
+        contributions: { channels: ["teams-meetings"] },
+      },
+    ],
+  })),
   listPluginContributionIds: vi.fn(() => ["external-chat"]),
 }));
 
@@ -65,6 +72,7 @@ describe("channelsLogsCommand", () => {
     runtime.exit.mockClear();
     pluginRegistryMocks.loadPluginRegistrySnapshot.mockClear();
     pluginRegistryMocks.listPluginContributionIds.mockClear();
+    pluginRegistryMocks.listPluginContributionIds.mockReturnValue(["external-chat"]);
   });
 
   afterEach(async () => {
@@ -78,6 +86,7 @@ describe("channelsLogsCommand", () => {
       logPath,
       [
         logLine({ module: "gateway/channels/external-chat/send", message: "external sent" }),
+        logLine({ module: "external-chat-send", message: "external suffix" }),
         logLine({ module: "gateway/channels/slack/send", message: "slack sent" }),
       ].join("\n"),
     );
@@ -92,7 +101,88 @@ describe("channelsLogsCommand", () => {
     expect(contributionOptions?.includeDisabled).toBe(true);
     const payload = readJsonPayload();
     expect(payload.channel).toBe("external-chat");
-    expect(payload.lines.map((line) => line.message)).toEqual(["external sent"]);
+    expect(payload.lines.map((line) => line.message)).toEqual(["external sent", "external suffix"]);
+  });
+
+  it("prefers an exact manifest channel id over a bundled alias", async () => {
+    pluginRegistryMocks.listPluginContributionIds.mockReturnValue(["teams"]);
+    await fs.writeFile(
+      logPath,
+      [
+        logLine({ module: "gateway/channels/teams/send", message: "exact sent" }),
+        logLine({ module: "gateway/channels/msteams/send", message: "alias sent" }),
+        logLine({ module: "teams-meetings", message: "unrelated plugin" }),
+      ].join("\n"),
+    );
+
+    await channelsLogsCommand({ channel: "teams", json: true }, runtime);
+
+    const payload = readJsonPayload();
+    expect(payload.channel).toBe("teams");
+    expect(payload.lines.map((line) => line.message)).toEqual(["exact sent"]);
+  });
+
+  it("keeps plugin-id log scopes when that plugin owns the requested channel", async () => {
+    pluginRegistryMocks.loadPluginRegistrySnapshot.mockReturnValueOnce({
+      plugins: [
+        {
+          pluginId: "openclaw-plugin-yuanbao",
+          contributions: { channels: ["yuanbao"] },
+        },
+      ],
+    });
+    pluginRegistryMocks.listPluginContributionIds.mockReturnValueOnce(["yuanbao"]);
+    await fs.writeFile(
+      logPath,
+      logLine({ module: "openclaw-plugin-yuanbao", message: "owned plugin scope" }),
+    );
+
+    await channelsLogsCommand({ channel: "yuanbao", json: true }, runtime);
+
+    expect(readJsonPayload().lines.map((line) => line.message)).toEqual(["owned plugin scope"]);
+  });
+
+  it("does not let a selected owner prefix swallow a longer unrelated plugin owner", async () => {
+    pluginRegistryMocks.loadPluginRegistrySnapshot.mockReturnValueOnce({
+      plugins: [
+        {
+          pluginId: "foo",
+          contributions: { channels: ["foo"] },
+        },
+        {
+          pluginId: "foo-tools",
+          contributions: { channels: ["foo-tools"] },
+        },
+      ],
+    });
+    pluginRegistryMocks.listPluginContributionIds.mockReturnValueOnce(["foo", "foo-tools"]);
+    await fs.writeFile(
+      logPath,
+      [
+        logLine({ module: "foo-worker", message: "selected owner" }),
+        logLine({ module: "foo-tools-worker", message: "unrelated longer owner" }),
+      ].join("\n"),
+    );
+
+    await channelsLogsCommand({ channel: "foo", json: true }, runtime);
+
+    expect(readJsonPayload().lines.map((line) => line.message)).toEqual(["selected owner"]);
+  });
+
+  it("includes delimiter-prefixed channel modules without matching longer channel ids", async () => {
+    await fs.writeFile(
+      logPath,
+      [
+        logLine({ module: "telegram-auto-reply", message: "telegram reply" }),
+        logLine({ module: "telegram-fetch", message: "telegram fetch" }),
+        logLine({ module: "msteams-auto-reply", message: "teams reply" }),
+      ].join("\n"),
+    );
+
+    await channelsLogsCommand({ channel: "telegram", json: true }, runtime);
+
+    const payload = readJsonPayload();
+    expect(payload.lines.map((line) => line.message)).toEqual(["telegram reply", "telegram fetch"]);
   });
 
   it("falls back to the latest rolling log when the configured rolling file is missing", async () => {

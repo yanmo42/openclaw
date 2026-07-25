@@ -13,7 +13,9 @@ import { baseConfigSnapshot } from "./test-runtime-config-helpers.js";
 
 const pluginRegistryMocks = vi.hoisted(() => ({
   loadPluginRegistrySnapshot: vi.fn(() => ({})),
-  listPluginContributionIds: vi.fn(() => ["external-chat"]),
+  listPluginContributionIds: vi.fn<
+    typeof import("../plugins/plugin-registry.js").listPluginContributionIds
+  >(() => ["external-chat"]),
 }));
 
 vi.mock("../agents/agent-scope.js", () => ({
@@ -92,6 +94,10 @@ vi.mock("../channels/plugins/bundled.js", () => {
         config: { listAccountIds: () => [] },
         resolveBindingAccountId: ({ agentId }) => agentId.toLowerCase(),
       }),
+    ],
+    [
+      "msteams",
+      createBindingResolverTestPlugin({ id: "msteams", config: { listAccountIds: () => [] } }),
     ],
     [
       "telegram",
@@ -222,6 +228,44 @@ describe("agents bind/unbind commands", () => {
     ]);
     expect(pluginRegistryMocks.loadPluginRegistrySnapshot).toHaveBeenCalled();
     expect(runtime.exit).not.toHaveBeenCalled();
+  });
+
+  it("does not preserve a disabled manifest channel id over a bundled alias", async () => {
+    readConfigFileSnapshotMock.mockResolvedValue({
+      ...baseConfigSnapshot,
+      config: {},
+    });
+    pluginRegistryMocks.listPluginContributionIds.mockImplementationOnce(
+      ({ includeDisabled }: { includeDisabled?: boolean }) => (includeDisabled ? ["teams"] : []),
+    );
+
+    await agentsBindCommand({ bind: ["teams"] }, runtime);
+
+    expect(firstWrittenConfig().bindings).toStrictEqual([
+      { type: "route", agentId: "main", match: { channel: "msteams" } },
+    ]);
+    expect(pluginRegistryMocks.listPluginContributionIds).toHaveBeenCalledWith(
+      expect.objectContaining({ includeDisabled: false }),
+    );
+  });
+
+  it("can unbind a persisted route owned by a disabled manifest channel", async () => {
+    readConfigFileSnapshotMock.mockResolvedValue({
+      ...baseConfigSnapshot,
+      config: {
+        bindings: [{ type: "route", agentId: "main", match: { channel: "teams" } }],
+      },
+    });
+    pluginRegistryMocks.listPluginContributionIds.mockImplementationOnce(
+      ({ includeDisabled }: { includeDisabled?: boolean }) => (includeDisabled ? ["teams"] : []),
+    );
+
+    await agentsUnbindCommand({ agent: "main", bind: ["teams"] }, runtime);
+
+    expect(firstWrittenConfig().bindings).toBeUndefined();
+    expect(pluginRegistryMocks.listPluginContributionIds).toHaveBeenCalledWith(
+      expect.objectContaining({ includeDisabled: true }),
+    );
   });
 
   it("unbinds all routes for an agent", async () => {
