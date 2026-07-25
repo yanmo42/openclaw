@@ -18,7 +18,7 @@ import {
   compareSessionRowsByUpdatedAt,
   filterVisibleSessionRows,
   resolveSessionNavigation,
-  tryPathForSessionKey,
+  pathForSessionKey,
 } from "../lib/sessions/index.ts";
 import {
   areUiSessionKeysEquivalent,
@@ -105,7 +105,6 @@ export function buildSidebarSessionNavigationState(input: {
     }
     return {
       key: row.key,
-      sessionId: row.sessionId,
       displayName: row.displayName,
       incognito: row.incognito === true,
       createdActor: row.createdActor,
@@ -116,8 +115,8 @@ export function buildSidebarSessionNavigationState(input: {
       meta: formatSidebarTimestamp(row.updatedAt),
       subtitle: resolveSessionWorkSubtitle(row),
       href:
-        tryPathForSessionKey("chat", row.key, context?.basePath ?? "", row) ??
-        (row.key === navigation.currentSessionKey ? globalThis.location?.pathname : "#") ??
+        pathForSessionKey("chat", row.key, context?.basePath ?? "", row) ||
+        (row.key === navigation.currentSessionKey ? globalThis.location?.pathname : "#") ||
         "#",
       active: row.key === navigation.activeRowKey,
       visuallyActive: input.highlightCurrentSession && row.key === navigation.currentSessionKey,

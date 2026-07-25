@@ -52,11 +52,30 @@ describe("ClickClack discussion service", () => {
     expect(harness.store.lookup("global")).toMatchObject({ agentId: "main" });
   });
 
+  it("uses the account agent for unscoped session links", async () => {
+    const harness = createHarness({ label: "Telegram peer" });
+    harness.config.channels!.clickclack!.agentId = "research";
+
+    await harness.service.open("telegram:12345");
+
+    expect(harness.createChannel).toHaveBeenCalledWith(
+      "wsp_team",
+      expect.objectContaining({
+        external_url: "https://control.example/control/chat/research/telegram/12345",
+      }),
+    );
+    expect(harness.store.lookup("telegram:12345")).toMatchObject({ agentId: "research" });
+
+    harness.config.channels!.clickclack!.agentId = "ops";
+    await harness.service.reconcile("telegram:12345");
+    expect(harness.updateChannel).not.toHaveBeenCalled();
+  });
+
   it("builds control links from URL path and query components", async () => {
     const harness = createHarness({ label: "Control link" });
     harness.config.channels!.clickclack!.discussions!.controlUrlBase =
       "https://control.example/control///?tenant=alpha#old";
-    const sessionKey = "agent:main:control-link";
+    const sessionKey = "agent:main:dashboard:12345678-90ab-cdef-1234-567890abcdef";
 
     await harness.service.open(sessionKey);
 
@@ -101,7 +120,6 @@ describe("ClickClack discussion service", () => {
     await harness.service.reconcile(sessionKey);
     expect(harness.updateChannel).toHaveBeenLastCalledWith("chn_discussion", {
       archived: true,
-      external_url: "https://control.example/control/chat/main/renamed-session-12345678",
       name: "renamed-session",
       sidebar_section: "Incidents",
     });
@@ -117,7 +135,6 @@ describe("ClickClack discussion service", () => {
     await harness.service.reconcile(sessionKey);
     expect(harness.updateChannel).toHaveBeenLastCalledWith("chn_discussion", {
       archived: true,
-      external_url: "",
     });
     expect(await harness.service.info(sessionKey)).toEqual({ state: "available" });
   });
@@ -464,9 +481,7 @@ describe("ClickClack discussion service", () => {
     );
 
     expect(harness.generationStore.lookup(sessionKey)).toMatchObject({
-      pending: expect.objectContaining({
-        sessionId: "12345678-90ab-cdef-1234-567890abcdef",
-      }),
+      pending: expect.objectContaining({ sessionId: "session-id" }),
     });
   });
 
@@ -478,9 +493,7 @@ describe("ClickClack discussion service", () => {
     await expect(harness.service.open(sessionKey)).rejects.toThrow("connection reset");
 
     expect(harness.generationStore.lookup(sessionKey)).toMatchObject({
-      pending: expect.objectContaining({
-        sessionId: "12345678-90ab-cdef-1234-567890abcdef",
-      }),
+      pending: expect.objectContaining({ sessionId: "session-id" }),
     });
   });
 
@@ -515,9 +528,7 @@ describe("ClickClack discussion service", () => {
     await expect(harness.service.open(sessionKey)).rejects.toThrow("connection reset");
 
     expect(harness.generationStore.lookup(sessionKey)).toMatchObject({
-      pending: expect.objectContaining({
-        sessionId: "12345678-90ab-cdef-1234-567890abcdef",
-      }),
+      pending: expect.objectContaining({ sessionId: "session-id" }),
     });
     expect(harness.revokedStore.entries()).toHaveLength(1);
   });
