@@ -30,6 +30,7 @@ async function createHelpProcessFixture(config?: Record<string, unknown>) {
   const configPath = path.join(stateDir, "openclaw.json");
   const tlsImportGuardPath = path.join(root, "forbid-tls-import.mjs");
   const keepAlivePath = path.join(root, "keep-alive.mjs");
+  const forceExitPath = path.join(root, "force-exit.mjs");
   await fs.mkdir(stateDir, { recursive: true });
   const profileConfigPath = path.join(root, ".openclaw-work", "openclaw.json");
   await fs.mkdir(path.dirname(profileConfigPath), { recursive: true });
@@ -52,7 +53,11 @@ registerHooks({
 `,
   );
   await fs.writeFile(keepAlivePath, "setInterval(() => {}, 60_000);\n");
-  return { root, stateDir, configPath, tlsImportGuardPath, keepAlivePath };
+  await fs.writeFile(
+    forceExitPath,
+    "setTimeout(() => process.exit(typeof process.exitCode === 'number' ? process.exitCode : 0), Number(process.env.OPENCLAW_TEST_FORCE_EXIT_MS));\n",
+  );
+  return { root, stateDir, configPath, tlsImportGuardPath, keepAlivePath, forceExitPath };
 }
 
 async function runCliProcess(params: {
@@ -62,6 +67,7 @@ async function runCliProcess(params: {
   useDefaultConfigPaths?: boolean;
   forbidTlsImport?: boolean;
   keepAlive?: boolean;
+  forceExitMs?: number;
 }) {
   const fixture = await createHelpProcessFixture(params.config);
   return await execFileAsync(
@@ -71,6 +77,7 @@ async function runCliProcess(params: {
         ? ["--import", pathToFileURL(fixture.tlsImportGuardPath).href]
         : []),
       ...(params.keepAlive ? ["--import", pathToFileURL(fixture.keepAlivePath).href] : []),
+      ...(params.forceExitMs ? ["--import", pathToFileURL(fixture.forceExitPath).href] : []),
       "--import",
       "tsx",
       "src/entry.ts",
@@ -88,6 +95,7 @@ async function runCliProcess(params: {
         OPENCLAW_CONFIG_PATH: params.useDefaultConfigPaths ? undefined : fixture.configPath,
         OPENCLAW_NO_RESPAWN: "1",
         OPENCLAW_STATE_DIR: params.useDefaultConfigPaths ? undefined : fixture.stateDir,
+        OPENCLAW_TEST_FORCE_EXIT_MS: params.forceExitMs ? String(params.forceExitMs) : undefined,
         VITEST: undefined,
         ...params.env,
       },
@@ -464,6 +472,32 @@ describe("JSON console style process output", () => {
         expect.objectContaining({
           level: "error",
           message: expect.stringContaining("Missing required argument"),
+        }),
+      ]),
+    );
+  });
+
+  it("structures required debug-proxy coverage diagnostics", async () => {
+    const result = await runCliProcess({
+      args: ["onboard", "recommendations", "--json"],
+      config: loggingConfig,
+      forceExitMs: 5_000,
+      env: {
+        OPENCLAW_DEBUG_PROXY_ENABLED: "1",
+        OPENCLAW_DEBUG_PROXY_REQUIRE: "1",
+      },
+    });
+
+    const records = [...parseJsonLines(result.stdout), ...parseJsonLines(result.stderr)];
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          level: "warn",
+          message: expect.stringContaining("debug proxy coverage"),
+        }),
+        expect.objectContaining({
+          level: "warn",
+          message: expect.stringContaining("remaining gaps"),
         }),
       ]),
     );

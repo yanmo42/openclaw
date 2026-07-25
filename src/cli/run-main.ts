@@ -960,7 +960,7 @@ async function bootstrapCliProxyCaptureAndDispatcher(
   if (options.ensureDispatcher !== false) {
     await startupTrace.measure("proxy-dispatcher", () => ensureCliEnvProxyDispatcher());
   }
-  maybeWarnAboutDebugProxyCoverage();
+  maybeWarnAboutDebugProxyCoverage(undefined, (message) => console.warn(message));
 }
 
 export async function runCli(argv: string[] = process.argv) {
