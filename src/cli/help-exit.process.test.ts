@@ -82,6 +82,7 @@ async function runCliProcess(params: {
   keepAlive?: boolean;
   forceExitMs?: number;
   unsupportedRuntime?: boolean;
+  allowRespawn?: boolean;
 }) {
   const fixture = await createHelpProcessFixture(params.config);
   return await execFileAsync(
@@ -110,7 +111,7 @@ async function runCliProcess(params: {
         NODE_OPTIONS: undefined,
         NODE_USE_SYSTEM_CA: "1",
         OPENCLAW_CONFIG_PATH: params.useDefaultConfigPaths ? undefined : fixture.configPath,
-        OPENCLAW_NO_RESPAWN: "1",
+        OPENCLAW_NO_RESPAWN: params.allowRespawn ? undefined : "1",
         OPENCLAW_STATE_DIR: params.useDefaultConfigPaths ? undefined : fixture.stateDir,
         OPENCLAW_TEST_FORCE_EXIT_MS: params.forceExitMs ? String(params.forceExitMs) : undefined,
         VITEST: undefined,
@@ -471,6 +472,22 @@ describe("JSON console style process output", () => {
         }),
       ]),
     );
+  });
+
+  it("preserves structured entry startup tracing across a normal respawn", async () => {
+    const result = await runCliProcess({
+      args: ["gateway", "status"],
+      allowRespawn: true,
+      config: loggingConfig,
+      env: { OPENCLAW_GATEWAY_STARTUP_TRACE: "1" },
+    });
+
+    const bootstrapRecords = parseJsonLines(result.stderr).filter(
+      (record) =>
+        typeof record.message === "string" &&
+        record.message.includes("startup trace: entry.bootstrap"),
+    );
+    expect(bootstrapRecords).toHaveLength(2);
   });
 
   it.each([

@@ -95,6 +95,7 @@ if (
     enableOpenClawCompileCache({
       installRoot,
     });
+    await configureGatewayStartupTraceConsoleFormatting(gatewayEntryStartupTrace);
     gatewayEntryStartupTrace.mark("bootstrap");
 
     if (shouldForceReadOnlyAuthStore(process.argv)) {
@@ -118,7 +119,6 @@ if (
     }
 
     if (!ensureCliRespawnReady()) {
-      await configureGatewayStartupTraceConsoleFormatting(gatewayEntryStartupTrace);
       const parsedContainer = parseCliContainerArgs(process.argv);
       if (!parsedContainer.ok) {
         await writeCapturedCliArgumentError(parsedContainer.error);
