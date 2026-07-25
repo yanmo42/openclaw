@@ -1076,7 +1076,6 @@ class SessionsPage extends OpenClawLightDomElement {
         scope.context.navigate("chat", {
           pathname: pathForSessionKey("chat", result.key, scope.context.basePath, {
             key: result.key,
-            sessionId: result.sessionId,
           }),
           hash: "",
         });
