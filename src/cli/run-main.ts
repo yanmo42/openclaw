@@ -964,9 +964,14 @@ export async function runCli(argv: string[] = process.argv) {
   const originalArgv = normalizeWindowsArgv(argv);
   const startupTrace = createGatewayStartupTrace(originalArgv, "cli.main");
   const originalInvocation = resolveCliArgvInvocation(originalArgv);
+  let consoleCaptureInstalled = false;
   const installConsoleCapture = async () => {
+    if (consoleCaptureInstalled) {
+      return;
+    }
     const { enableConsoleCapture } = await loadLoggingModule();
     enableConsoleCapture();
+    consoleCaptureInstalled = true;
   };
   const parsedContainer = parseCliContainerArgs(originalArgv);
   if (!parsedContainer.ok) {
@@ -1159,6 +1164,10 @@ export async function runCli(argv: string[] = process.argv) {
         return;
       }
     }
+
+    // Genuine help fast paths have returned. Any remaining help/version-shaped
+    // invocation can still fail validation and must honor the console style.
+    await installConsoleCapture();
 
     // Reject unowned command roots before help/version routing, so that
     // `openclaw <typo> --help` surfaces the same Unknown command error as
