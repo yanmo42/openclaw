@@ -34,8 +34,8 @@ async function runPolicyCli(args: readonly string[]) {
     output.push(String(chunk));
     return true;
   }) as typeof process.stderr.write);
-  const consoleError = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
-    output.push(`${args.map(String).join(" ")}\n`);
+  const consoleError = vi.spyOn(console, "error").mockImplementation((...values: unknown[]) => {
+    output.push(`${values.map(String).join(" ")}\n`);
   });
   const previousExitCode = process.exitCode;
   process.exitCode = undefined;
