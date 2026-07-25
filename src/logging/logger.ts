@@ -695,6 +695,24 @@ export function getLogger(): TsLogger<LogObj> {
   return loggingState.cachedLogger as TsLogger<LogObj>;
 }
 
+type SubLoggerSettings = NonNullable<Parameters<TsLogger<LogObj>["getSubLogger"]>[0]>;
+
+function getSubLoggerWithResolvedMinLevel(
+  logger: TsLogger<LogObj>,
+  settings: SubLoggerSettings,
+  minLevel: number,
+): TsLogger<LogObj> {
+  const silent = minLevel === levelToMinLevel("silent");
+  const child = logger.getSubLogger({
+    ...settings,
+    minLevel: silent ? levelToMinLevel("fatal") : minLevel,
+  });
+  if (silent) {
+    child.settings.minLevel = minLevel;
+  }
+  return child;
+}
+
 export function getChildLogger(
   bindings?: Record<string, unknown>,
   opts?: { level?: LogLevel },
@@ -702,21 +720,25 @@ export function getChildLogger(
   const base = getLogger();
   const minLevel = opts?.level ? levelToMinLevel(opts.level) : base.settings.minLevel;
   const name = bindings ? JSON.stringify(bindings) : undefined;
-  return base.getSubLogger({
-    name,
+  return getSubLoggerWithResolvedMinLevel(
+    base,
+    {
+      name,
+      prefix: bindings ? [name ?? ""] : [],
+    },
     minLevel,
-    prefix: bindings ? [name ?? ""] : [],
-  });
+  );
 }
 
 // Baileys expects a pino-like logger shape. Provide a lightweight adapter.
 export function toPinoLikeLogger(logger: TsLogger<LogObj>, level: LogLevel): PinoLikeLogger {
   const buildChild = (bindings?: Record<string, unknown>) =>
     toPinoLikeLogger(
-      logger.getSubLogger({
-        name: bindings ? JSON.stringify(bindings) : undefined,
-        minLevel: logger.settings.minLevel,
-      }),
+      getSubLoggerWithResolvedMinLevel(
+        logger,
+        { name: bindings ? JSON.stringify(bindings) : undefined },
+        logger.settings.minLevel,
+      ),
       level,
     );
 
