@@ -1074,9 +1074,18 @@ class SessionsPage extends OpenClawLightDomElement {
       });
       if (this.isRequestScopeCurrent(scope)) {
         scope.context.navigate("chat", {
-          pathname: pathForSessionKey("chat", result.key, scope.context.basePath, {
-            key: result.key,
-          }),
+          pathname: pathForSessionKey(
+            "chat",
+            result.key,
+            scope.context.basePath,
+            {
+              key: result.key,
+            },
+            resolveUiConfiguredMainKey({
+              agentsList: scope.context.agents.state.agentsList,
+              hello: scope.gateway.snapshot.hello,
+            }),
+          ),
           hash: "",
         });
       }
@@ -1225,7 +1234,16 @@ class SessionsPage extends OpenClawLightDomElement {
           switch (action.kind) {
             case "open-chat":
               context.navigate("chat", {
-                pathname: pathForSessionKey("chat", row.key, context.basePath, row),
+                pathname: pathForSessionKey(
+                  "chat",
+                  row.key,
+                  context.basePath,
+                  row,
+                  resolveUiConfiguredMainKey({
+                    agentsList: context.agents.state.agentsList,
+                    hello: context.gateway.snapshot.hello,
+                  }),
+                ),
                 hash: "",
               });
               break;
@@ -1308,6 +1326,10 @@ class SessionsPage extends OpenClawLightDomElement {
           includeUnknown: this.includeUnknown,
           statusFilter: this.statusFilter,
           basePath: context.basePath,
+          mainKey: resolveUiConfiguredMainKey({
+            agentsList: context.agents.state.agentsList,
+            hello: context.gateway.snapshot.hello,
+          }),
           searchQuery: this.searchQuery,
           transcriptSearchAvailable:
             isGatewayMethodAdvertised(context.gateway.snapshot, "sessions.search") === true,
@@ -1398,6 +1420,10 @@ class SessionsPage extends OpenClawLightDomElement {
                 sessionKey,
                 context.basePath,
                 this.result?.sessions.find((row) => row.key === sessionKey),
+                resolveUiConfiguredMainKey({
+                  agentsList: context.agents.state.agentsList,
+                  hello: context.gateway.snapshot.hello,
+                }),
               ),
               hash: "",
             }),

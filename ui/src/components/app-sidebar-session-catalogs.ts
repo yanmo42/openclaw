@@ -6,7 +6,6 @@ import type {
 } from "../../../packages/gateway-protocol/src/index.ts";
 import type { GatewaySessionRow } from "../api/types.ts";
 import type { NavigationRouteId } from "../app-navigation.ts";
-import { pathForRoute } from "../app-route-paths.ts";
 import type { ApplicationNavigationOptions } from "../app/context.ts";
 import { t } from "../i18n/index.ts";
 import { formatRelativeTimestamp } from "../lib/format.ts";
@@ -14,13 +13,13 @@ import type {
   CatalogSessionContinuedDetail,
   CatalogSessionKey,
 } from "../lib/sessions/catalog-key.ts";
-import { buildCatalogSessionKey } from "../lib/sessions/catalog-key.ts";
+import { buildCatalogSessionKey, catalogSessionSearch } from "../lib/sessions/catalog-key.ts";
 import {
   groupCatalogSessionsByProject,
   type CatalogProjectGrouping,
 } from "../lib/sessions/catalog-project-grouping.ts";
 import { pathForSessionKey } from "../lib/sessions/index.ts";
-import { newSessionSearch, type NewSessionTarget } from "../pages/new-session/location.ts";
+import type { NewSessionTarget } from "../pages/new-session/location.ts";
 import { shouldHandleNavigationClick } from "./app-sidebar-nav-menus.ts";
 import { icons } from "./icons.ts";
 import { renderSessionRowBadges } from "./session-row-badges.ts";
@@ -65,6 +64,16 @@ export type CatalogSessionMenuRequest = {
   meta: string;
 };
 
+export function catalogSessionNavigation(
+  agentId: string,
+  key: CatalogSessionKey,
+  basePath = "",
+): { href: string; navigation: ApplicationNavigationOptions } {
+  const pathname = pathForSessionKey("chat", `agent:${agentId}:main`, basePath);
+  const search = catalogSessionSearch(key);
+  return { href: `${pathname}${search}`, navigation: { pathname, search } };
+}
+
 /** Stamps a freshly adopted session key onto its catalog row so the sidebar
     binds it before the next catalog poll confirms the adoption. */
 export function bindAdoptedCatalogSession(
@@ -98,6 +107,7 @@ type SessionCatalogGroupsParams = {
   basePath: string;
   routeSessionKey: string;
   newSessionAgentId: string;
+  mainKey: string;
   collapsedSections: ReadonlySet<string>;
   loadingMoreCatalogIds: ReadonlySet<string>;
   projectGrouping: CatalogProjectGrouping;
@@ -386,18 +396,14 @@ function renderCatalogSessionRow(
   const key = session.sessionKey ?? buildCatalogSessionKey(catalogKey);
   const label = session.name || session.threadId;
   const meta = formatSidebarTimestamp(timestamp);
+  const routeId = "chat";
   const sessionPath = session.sessionKey
-    ? pathForSessionKey("chat", session.sessionKey, params.basePath)
+    ? pathForSessionKey("chat", session.sessionKey, params.basePath, undefined, params.mainKey)
     : null;
-  const routeId = sessionPath ? "chat" : "new-session";
-  const navigation: ApplicationNavigationOptions = sessionPath
-    ? { pathname: sessionPath }
-    : {
-        search: newSessionSearch(params.newSessionAgentId, { catalogId: catalog.id }),
-      };
-  const href = sessionPath
-    ? sessionPath
-    : `${pathForRoute("new-session", params.basePath)}${navigation.search}`;
+  const target = sessionPath
+    ? { href: sessionPath, navigation: { pathname: sessionPath } }
+    : catalogSessionNavigation(params.newSessionAgentId, catalogKey, params.basePath);
+  const { href, navigation } = target;
   const active = params.routeSessionKey !== "" && key === params.routeSessionKey;
   const running = session.status === "active" || session.status === "running";
   const canOpenTerminal = session.canOpenTerminal === true && params.terminalAvailable;

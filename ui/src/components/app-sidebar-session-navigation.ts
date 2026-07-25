@@ -275,6 +275,7 @@ export class AppSidebarSessionNavigationElement extends AppSidebarBase {
       sessionKey,
       this.basePath,
       this.findSidebarSessionByKey(sessionKey),
+      this.sessionMainKey(),
     );
     this.context?.gateway.setSessionKey(sessionKey);
     this.onNavigate?.("chat", {
@@ -406,6 +407,7 @@ export class AppSidebarSessionNavigationElement extends AppSidebarBase {
       sessionKey,
       this.basePath,
       this.findSidebarSessionByKey(sessionKey),
+      this.sessionMainKey(),
     );
     this.context?.gateway.setSessionKey(sessionKey);
     if (isSessionRouteId(this.activeRouteId)) {
@@ -466,10 +468,14 @@ export class AppSidebarSessionNavigationElement extends AppSidebarBase {
     }
     return buildAgentMainSessionKey({
       agentId,
-      mainKey: resolveUiConfiguredMainKey({
-        agentsList: this.context?.agents.state.agentsList,
-        hello: this.context?.gateway.snapshot.hello,
-      }),
+      mainKey: this.sessionMainKey(),
+    });
+  }
+
+  protected sessionMainKey(): string {
+    return resolveUiConfiguredMainKey({
+      agentsList: this.context?.agents.state.agentsList,
+      hello: this.context?.gateway.snapshot.hello,
     });
   }
 
@@ -508,7 +514,13 @@ export class AppSidebarSessionNavigationElement extends AppSidebarBase {
     const draft = encodeURIComponent(t("chat.welcome.suggestions.whatCanYouDo"));
     this.context?.gateway.setSessionKey(key);
     this.onNavigate?.("chat", {
-      pathname: pathForSessionKey("chat", key, this.basePath, this.findSidebarSessionByKey(key)),
+      pathname: pathForSessionKey(
+        "chat",
+        key,
+        this.basePath,
+        this.findSidebarSessionByKey(key),
+        this.sessionMainKey(),
+      ),
       search: `?draft=${draft}`,
     });
   }
