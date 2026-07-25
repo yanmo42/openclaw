@@ -34,11 +34,10 @@ const ENTRY_WRAPPER_PAIRS = [
 const loadRootHelpLiveConfigModule = async () => await import("./cli/root-help-live-config.js");
 const loadRootHelpMetadataModule = async () => await import("./cli/root-help-metadata.js");
 
-async function exitWithCapturedCliArgumentError(message: string): Promise<never> {
+async function writeCapturedCliArgumentError(message: string): Promise<void> {
   const { enableConsoleCapture } = await import("./logging.js");
   enableConsoleCapture();
   console.error(`[openclaw] ${message}`);
-  process.exit(2);
 }
 
 function shouldForceReadOnlyAuthStore(argv: string[]): boolean {
@@ -110,20 +109,21 @@ if (
     if (!ensureCliRespawnReady()) {
       const parsedContainer = parseCliContainerArgs(process.argv);
       if (!parsedContainer.ok) {
-        await exitWithCapturedCliArgumentError(parsedContainer.error);
+        await writeCapturedCliArgumentError(parsedContainer.error);
+        process.exit(2);
       }
 
       const parsed = parseCliProfileArgs(parsedContainer.argv);
       if (!parsed.ok) {
         // Keep it simple; Commander will handle rich help/errors after we strip flags.
-        await exitWithCapturedCliArgumentError(parsed.error);
+        await writeCapturedCliArgumentError(parsed.error);
+        process.exit(2);
       }
 
       const containerTargetName = resolveCliContainerTarget(process.argv);
       if (containerTargetName && parsed.profile) {
-        await exitWithCapturedCliArgumentError(
-          "--container cannot be combined with --profile/--dev",
-        );
+        await writeCapturedCliArgumentError("--container cannot be combined with --profile/--dev");
+        process.exit(2);
       }
 
       if (parsed.profile) {
