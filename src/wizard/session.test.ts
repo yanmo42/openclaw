@@ -231,12 +231,11 @@ describe("WizardSession", () => {
     expect((await session.next()).status).toBe("done");
   });
 
-  test("releases a locked QR prompt so its durable operation can finish", async () => {
-    let answer: boolean | undefined;
+  test("keeps a locked QR prompt pending when its owner disconnects", async () => {
     const session = new WizardSession(
       async (prompter, _signal, wizardSession) => {
         wizardSession.lockCancellation();
-        answer = await prompter.qrCode?.({
+        await prompter.qrCode?.({
           title: "Link account",
           message: "Scan this code",
           pngBase64: "cG5n",
@@ -247,16 +246,16 @@ describe("WizardSession", () => {
 
     expect((await session.next()).step?.qrCodePngBase64).toBe("cG5n");
     expect(session.cancel()).toBe(false);
-    expect((await session.next()).status).toBe("done");
-    expect(answer).toBe(true);
+    expect(session.getStatus()).toBe("running");
     expect(session.signal.aborted).toBe(false);
   });
 
-  test("retires a QR prompt when its external operation completes", async () => {
+  test("advances an externally completed QR only from the next owned answer", async () => {
     let complete!: () => void;
     const completion = new Promise<void>((resolve) => {
       complete = resolve;
     });
+    const advanced = vi.fn();
     const session = new WizardSession(
       async (prompter, _signal, wizardSession) => {
         wizardSession.lockCancellation();
@@ -266,6 +265,7 @@ describe("WizardSession", () => {
           pngBase64: "cG5n",
           dismissWhen: completion,
         });
+        advanced();
         await prompter.text({ message: "Recovery path" });
       },
       { supportsQrCode: true },
@@ -276,17 +276,56 @@ describe("WizardSession", () => {
     if (!qr.step) {
       throw new Error("expected QR step");
     }
+    await expect(session.answer(qr.step.id, true)).resolves.toContain(
+      "still waiting for the external operation",
+    );
+    expect(advanced).not.toHaveBeenCalled();
     complete();
     await completion;
     await Promise.resolve();
+    expect(advanced).not.toHaveBeenCalled();
     await expect(session.answer(qr.step.id, true)).resolves.toBeUndefined();
     const recovery = await session.next();
+    expect(advanced).toHaveBeenCalledOnce();
     expect(recovery.step?.message).toBe("Recovery path");
     if (!recovery.step) {
       throw new Error("expected recovery step");
     }
     await session.answer(recovery.step.id, "retry");
     expect((await session.next()).status).toBe("done");
+  });
+
+  test("advances after external QR completion rejects so the runner can surface the error", async () => {
+    let rejectCompletion!: (error: Error) => void;
+    const completion = new Promise<void>((_resolve, reject) => {
+      rejectCompletion = reject;
+    });
+    const session = new WizardSession(
+      async (prompter, _signal, wizardSession) => {
+        wizardSession.lockCancellation();
+        await prompter.qrCode?.({
+          title: "Link account",
+          message: "Scan this code",
+          pngBase64: "cG5n",
+          dismissWhen: completion,
+        });
+        await completion;
+      },
+      { supportsQrCode: true },
+    );
+
+    const qr = await session.next();
+    if (!qr.step) {
+      throw new Error("expected QR step");
+    }
+    rejectCompletion(new Error("external link failed"));
+    await Promise.resolve();
+    await expect(session.answer(qr.step.id, true)).resolves.toBeUndefined();
+    await expect(session.next()).resolves.toMatchObject({
+      done: true,
+      status: "error",
+      error: "Error: external link failed",
+    });
   });
 
   test("retains a locked session that has moved on to a recovery prompt", async () => {

@@ -6,7 +6,7 @@ import {
   runSetupWizardPrepare,
 } from "openclaw/plugin-sdk/plugin-test-runtime";
 import { WizardCancelledError } from "openclaw/plugin-sdk/setup";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SignalTransportConfig } from "./account-types.js";
 import { resolveSignalAccount } from "./accounts.js";
 import type { SignalDaemonHandle } from "./daemon.js";
@@ -64,6 +64,7 @@ const mocks = vi.hoisted(() => ({
       isExited: () => false,
     }),
   ),
+  assertSignalDaemonBindAvailable: vi.fn(async () => undefined),
   prepareSignalManagedNativeTransport: vi.fn(
     (): Extract<SignalTransportConfig, { kind: "managed-native" }> => ({
       kind: "managed-native",
@@ -94,6 +95,7 @@ vi.mock("openclaw/plugin-sdk/media-runtime", () => ({
 }));
 
 vi.mock("./daemon.js", () => ({
+  assertSignalDaemonBindAvailable: mocks.assertSignalDaemonBindAvailable,
   spawnSignalDaemon: mocks.spawnSignalDaemon,
 }));
 
@@ -127,11 +129,16 @@ describe("signalSetupWizard", () => {
       url,
     }));
     mocks.probeSignalTransport.mockReset().mockResolvedValue({ ok: true, status: 200 });
+    mocks.assertSignalDaemonBindAvailable.mockReset().mockResolvedValue(undefined);
     mocks.runPluginCommandWithTimeout.mockResolvedValue({
       code: 0,
       stdout: '[{"number":"+15555550123"}]',
       stderr: "",
     });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("keeps account entry reversible until immediately before signal-cli installation", async () => {
@@ -429,6 +436,137 @@ describe("signalSetupWizard", () => {
     ).toBe("+15555550123");
   });
 
+  it("lets the user correct local signal-cli settings after account discovery fails", async () => {
+    mocks.runPluginCommandWithTimeout
+      .mockResolvedValueOnce({
+        code: 1,
+        stdout: "",
+        stderr: "signal-cli not found",
+      })
+      .mockResolvedValueOnce({
+        code: 0,
+        stdout: '[{"number":"+15555550123"}]',
+        stderr: "",
+      });
+    mocks.prepareSignalManagedNativeTransport
+      .mockReturnValueOnce({
+        kind: "managed-native",
+        cliPath: "/opt/openclaw/signal-cli",
+        configPath: "/var/lib/signal-cli",
+        httpHost: "127.0.0.1",
+        httpPort: 8080,
+      })
+      .mockReturnValueOnce({
+        kind: "managed-native",
+        cliPath: "/usr/local/bin/signal-cli",
+        httpHost: "127.0.0.1",
+        httpPort: 8080,
+      });
+    const queued = createQueuedWizardPrompter({
+      selectValues: ["settings", "default"],
+      textValues: ["/usr/local/bin/signal-cli"],
+    });
+
+    const finalized = await runSetupWizardFinalize({
+      finalize: signalSetupWizard.finalize,
+      cfg: {},
+      accountId: "work",
+      credentialValues: managedSignalCredentialValues,
+      prompter: queued.prompter,
+      runtime: createRuntimeEnv({ throwOnExit: false }),
+    });
+
+    expect(queued.note).toHaveBeenCalledWith(
+      expect.stringContaining("signal-cli could not list its linked accounts"),
+      "Signal account discovery",
+    );
+    expect(queued.select).toHaveBeenCalledWith({
+      message: "How should local signal-cli setup continue?",
+      options: [
+        { value: "retry", label: "Retry account discovery" },
+        { value: "settings", label: "Change signal-cli settings" },
+        { value: "stop", label: "Stop Signal setup" },
+      ],
+      initialValue: "settings",
+    });
+    expect(mocks.runPluginCommandWithTimeout).toHaveBeenLastCalledWith({
+      argv: ["/usr/local/bin/signal-cli", "--output", "json", "listAccounts"],
+      timeoutMs: 10_000,
+    });
+    expect(finalized?.cfg?.channels?.signal?.accounts?.work?.transport).toEqual(
+      expect.objectContaining({
+        kind: "managed-native",
+        cliPath: "/usr/local/bin/signal-cli",
+      }),
+    );
+    expect(finalized?.cfg?.channels?.signal?.accounts?.work?.transport).not.toHaveProperty(
+      "configPath",
+    );
+  });
+
+  it("rechecks the live signal-cli store after account-discovery settings recovery", async () => {
+    mocks.runPluginCommandWithTimeout.mockResolvedValueOnce({
+      code: 1,
+      stdout: "",
+      stderr: "signal-cli data store unavailable",
+    });
+    mocks.prepareSignalManagedNativeTransport
+      .mockReturnValueOnce({
+        kind: "managed-native",
+        cliPath: "/opt/openclaw/signal-cli",
+        configPath: "/var/lib/signal-cli-candidate",
+        httpHost: "127.0.0.1",
+        httpPort: 8080,
+      })
+      .mockReturnValueOnce({
+        kind: "managed-native",
+        cliPath: "/opt/openclaw/signal-cli",
+        configPath: "/var/lib/signal-cli-active",
+        httpHost: "127.0.0.1",
+        httpPort: 8080,
+      });
+    const queued = createQueuedWizardPrompter({
+      selectValues: ["settings", "custom"],
+      textValues: ["/opt/openclaw/signal-cli", "/var/lib/signal-cli-active"],
+    });
+
+    const finalized = await runSetupWizardFinalize({
+      finalize: signalSetupWizard.finalize,
+      cfg: {
+        channels: {
+          signal: {
+            accounts: {
+              work: {
+                account: "+15555550123",
+                transport: {
+                  kind: "managed-native",
+                  cliPath: "/opt/openclaw/signal-cli",
+                  configPath: "/var/lib/signal-cli-active",
+                  httpHost: "127.0.0.1",
+                  httpPort: 8080,
+                },
+              },
+            },
+          },
+        },
+      } as OpenClawConfig,
+      accountId: "work",
+      credentialValues: managedSignalCredentialValues,
+      prompter: queued.prompter,
+      runtime: createRuntimeEnv({ throwOnExit: false }),
+    });
+
+    expect(mocks.probeSignalTransport).toHaveBeenCalledTimes(2);
+    expect(mocks.runPluginCommandWithTimeout).toHaveBeenCalledOnce();
+    expect(mocks.spawnSignalDaemon).not.toHaveBeenCalled();
+    expect(finalized?.cfg?.channels?.signal?.accounts?.work?.transport).toEqual(
+      expect.objectContaining({
+        kind: "managed-native",
+        configPath: "/var/lib/signal-cli-active",
+      }),
+    );
+  });
+
   it("lets the user choose among multiple existing local signal-cli accounts", async () => {
     mocks.runPluginCommandWithTimeout.mockResolvedValue({
       code: 0,
@@ -620,6 +758,93 @@ describe("signalSetupWizard", () => {
     expect(mocks.spawnSignalDaemon.mock.results[0]?.value.stop).toHaveBeenCalledOnce();
   });
 
+  it("does not accept a separate connection URL before the spawned daemon bind is ready", async () => {
+    mocks.prepareSignalManagedNativeTransport.mockReturnValueOnce({
+      kind: "managed-native",
+      cliPath: "/opt/openclaw/signal-cli",
+      configPath: "/var/lib/signal-cli",
+      httpHost: "127.0.0.1",
+      httpPort: 8080,
+      url: "https://signal.example.test",
+    });
+    const stop = vi.fn(async () => undefined);
+    mocks.spawnSignalDaemon.mockReturnValueOnce({
+      pid: 1234,
+      stop,
+      exited: Promise.resolve({ code: 1, signal: null }),
+      isExited: vi.fn().mockReturnValueOnce(false).mockReturnValue(true),
+    });
+    mocks.probeSignalTransport.mockImplementation(async ({ transport }) => ({
+      ok: transport.url === "https://signal.example.test",
+      ...(transport.url === "https://signal.example.test"
+        ? { status: 200 }
+        : { error: "spawned bind is not ready" }),
+    }));
+    const queued = createQueuedWizardPrompter({ selectValues: ["stop"] });
+
+    await expect(
+      runSetupWizardFinalize({
+        finalize: signalSetupWizard.finalize,
+        cfg: {},
+        accountId: "work",
+        credentialValues: managedSignalCredentialValues,
+        prompter: queued.prompter,
+        runtime: createRuntimeEnv({ throwOnExit: false }),
+      }),
+    ).rejects.toBeInstanceOf(WizardCancelledError);
+
+    expect(mocks.probeSignalTransport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transport: expect.objectContaining({
+          kind: "managed-native",
+          url: "http://127.0.0.1:8080",
+        }),
+      }),
+    );
+    expect(stop).toHaveBeenCalledOnce();
+  });
+
+  it("rejects an occupied managed bind before probing a different process", async () => {
+    mocks.assertSignalDaemonBindAvailable.mockRejectedValueOnce(
+      new Error(
+        "Signal cannot start a managed daemon on 127.0.0.1:8080 because that address is already in use.",
+      ),
+    );
+    const queued = createQueuedWizardPrompter({ selectValues: ["stop"] });
+
+    await expect(
+      runSetupWizardFinalize({
+        finalize: signalSetupWizard.finalize,
+        cfg: {
+          channels: {
+            signal: {
+              accounts: {
+                work: {
+                  account: "+15555550123",
+                  transport: {
+                    kind: "external-native",
+                    url: "http://127.0.0.1:8080",
+                  },
+                },
+              },
+            },
+          },
+        } as OpenClawConfig,
+        accountId: "work",
+        credentialValues: managedSignalCredentialValues,
+        prompter: queued.prompter,
+        runtime: createRuntimeEnv({ throwOnExit: false }),
+      }),
+    ).rejects.toBeInstanceOf(WizardCancelledError);
+
+    expect(queued.note).toHaveBeenCalledWith(
+      expect.stringContaining("address is already in use"),
+      "Signal setup",
+    );
+    expect(mocks.spawnSignalDaemon).not.toHaveBeenCalled();
+    expect(mocks.probeSignalTransport).not.toHaveBeenCalled();
+  });
+
   it("stops managed validation immediately when the remote wizard is cancelled", async () => {
     const abortController = new AbortController();
     const cancellation = new WizardCancelledError("Signal setup stopped");
@@ -655,230 +880,6 @@ describe("signalSetupWizard", () => {
     ).rejects.toBe(cancellation);
 
     expect(stop).toHaveBeenCalledOnce();
-  });
-
-  it("probes an unchanged running managed daemon without starting a competing process", async () => {
-    const queued = createQueuedWizardPrompter();
-
-    const finalized = await runSetupWizardFinalize({
-      finalize: signalSetupWizard.finalize,
-      cfg: configuredManagedSignalConfig(),
-      accountId: "work",
-      credentialValues: managedSignalCredentialValues,
-      prompter: queued.prompter,
-      runtime: createRuntimeEnv({ throwOnExit: false }),
-    });
-
-    expect(mocks.probeSignalTransport).toHaveBeenCalledOnce();
-    expect(mocks.spawnSignalDaemon).not.toHaveBeenCalled();
-    expect(mocks.runPluginCommandWithTimeout).not.toHaveBeenCalled();
-    expect(queued.progress).not.toHaveBeenCalled();
-    expect(
-      resolveSignalAccount({ cfg: finalized?.cfg ?? {}, accountId: "work" }).config.accountUuid,
-    ).toBe("123e4567-e89b-12d3-a456-426614174000");
-  });
-
-  it("does not enumerate accounts locked by an unchanged running daemon", async () => {
-    mocks.runPluginCommandWithTimeout.mockResolvedValue({
-      code: 0,
-      stdout: '[{"number":"+15555550124"}]',
-      stderr: "",
-    });
-    const queued = createQueuedWizardPrompter();
-
-    const finalized = await runSetupWizardFinalize({
-      finalize: signalSetupWizard.finalize,
-      cfg: configuredManagedSignalConfig(),
-      accountId: "work",
-      credentialValues: managedSignalCredentialValues,
-      prompter: queued.prompter,
-      runtime: createRuntimeEnv({ throwOnExit: false }),
-    });
-
-    expect(mocks.runPluginCommandWithTimeout).not.toHaveBeenCalled();
-    expect(mocks.probeSignalTransport).toHaveBeenCalledOnce();
-    expect(mocks.spawnSignalDaemon).not.toHaveBeenCalled();
-    expect(
-      resolveSignalAccount({ cfg: finalized?.cfg ?? {}, accountId: "work" }).config.account,
-    ).toBe("+15555550123");
-    expect(
-      resolveSignalAccount({ cfg: finalized?.cfg ?? {}, accountId: "work" }).config.accountUuid,
-    ).toBe("123e4567-e89b-12d3-a456-426614174000");
-  });
-
-  it("stops before account discovery when an accountless managed daemon is running", async () => {
-    const queued = createQueuedWizardPrompter();
-
-    await expect(
-      runSetupWizardFinalize({
-        finalize: signalSetupWizard.finalize,
-        cfg: {
-          channels: {
-            signal: {
-              accounts: {
-                work: {
-                  transport: {
-                    kind: "managed-native",
-                    cliPath: "/opt/openclaw/signal-cli",
-                    configPath: "/var/lib/signal-cli",
-                    httpHost: "127.0.0.1",
-                    httpPort: 8080,
-                  },
-                },
-              },
-            },
-          },
-        } as OpenClawConfig,
-        accountId: "work",
-        credentialValues: managedSignalCredentialValues,
-        prompter: queued.prompter,
-        runtime: createRuntimeEnv({ throwOnExit: false }),
-      }),
-    ).rejects.toThrow(
-      "The running Signal daemon is using this signal-cli config directory. Stop the OpenClaw gateway before discovering or linking an account, then retry setup.",
-    );
-
-    expect(mocks.probeSignalTransport).toHaveBeenCalledOnce();
-    expect(mocks.runPluginCommandWithTimeout).not.toHaveBeenCalled();
-    expect(mocks.spawnSignalDaemon).not.toHaveBeenCalled();
-  });
-
-  it("reuses an unchanged active transport when both data directories are implicit", async () => {
-    mocks.prepareSignalManagedNativeTransport.mockReturnValueOnce({
-      kind: "managed-native",
-      cliPath: "/opt/openclaw/signal-cli",
-      httpHost: "127.0.0.1",
-      httpPort: 8080,
-    });
-    const cfg = configuredManagedSignalConfig();
-    const work = cfg.channels?.signal?.accounts?.work;
-    if (work?.transport?.kind !== "managed-native") {
-      throw new Error("expected managed Signal fixture");
-    }
-    delete work.transport.configPath;
-
-    await runSetupWizardFinalize({
-      finalize: signalSetupWizard.finalize,
-      cfg,
-      accountId: "work",
-      credentialValues: {
-        signalTransportKind: "managed-native",
-        signalCliPath: "/opt/openclaw/signal-cli",
-      },
-      prompter: createQueuedWizardPrompter().prompter,
-      runtime: createRuntimeEnv({ throwOnExit: false }),
-    });
-
-    expect(mocks.probeSignalTransport).toHaveBeenCalledOnce();
-    expect(mocks.runPluginCommandWithTimeout).not.toHaveBeenCalled();
-    expect(mocks.spawnSignalDaemon).not.toHaveBeenCalled();
-  });
-
-  it("fails closed when an active implicit data directory is compared with an explicit path", async () => {
-    const queued = createQueuedWizardPrompter();
-    const cfg = configuredManagedSignalConfig();
-    const work = cfg.channels?.signal?.accounts?.work;
-    if (work?.transport?.kind !== "managed-native") {
-      throw new Error("expected managed Signal fixture");
-    }
-    delete work.transport.configPath;
-
-    await expect(
-      runSetupWizardFinalize({
-        finalize: signalSetupWizard.finalize,
-        cfg,
-        accountId: "work",
-        credentialValues: managedSignalCredentialValues,
-        prompter: queued.prompter,
-        runtime: createRuntimeEnv({ throwOnExit: false }),
-      }),
-    ).rejects.toThrow("The running Signal daemon may be using this signal-cli config directory");
-
-    expect(mocks.probeSignalTransport).toHaveBeenCalledOnce();
-    expect(mocks.runPluginCommandWithTimeout).not.toHaveBeenCalled();
-    expect(mocks.spawnSignalDaemon).not.toHaveBeenCalled();
-  });
-
-  it("preserves account UUID while revalidating the same offline managed account", async () => {
-    mocks.probeSignalTransport
-      .mockResolvedValueOnce({ ok: false, error: "not running" })
-      .mockResolvedValueOnce({ ok: true, status: 200 });
-    const queued = createQueuedWizardPrompter();
-
-    const finalized = await runSetupWizardFinalize({
-      finalize: signalSetupWizard.finalize,
-      cfg: configuredManagedSignalConfig(),
-      accountId: "work",
-      credentialValues: managedSignalCredentialValues,
-      prompter: queued.prompter,
-      runtime: createRuntimeEnv({ throwOnExit: false }),
-    });
-
-    expect(mocks.runPluginCommandWithTimeout).toHaveBeenCalledOnce();
-    expect(mocks.spawnSignalDaemon).toHaveBeenCalledOnce();
-    expect(
-      resolveSignalAccount({ cfg: finalized?.cfg ?? {}, accountId: "work" }).config.accountUuid,
-    ).toBe("123e4567-e89b-12d3-a456-426614174000");
-  });
-
-  it("explains that a live daemon must stop before changing its signal-cli settings", async () => {
-    const queued = createQueuedWizardPrompter();
-
-    await expect(
-      runSetupWizardFinalize({
-        finalize: signalSetupWizard.finalize,
-        cfg: {
-          channels: {
-            signal: {
-              accounts: {
-                work: {
-                  account: "+15555550123",
-                  transport: {
-                    kind: "managed-native",
-                    cliPath: "signal-cli",
-                    configPath: "/var/lib/signal-cli",
-                    httpHost: "127.0.0.1",
-                    httpPort: 8080,
-                  },
-                },
-              },
-            },
-          },
-        } as OpenClawConfig,
-        accountId: "work",
-        credentialValues: managedSignalCredentialValues,
-        prompter: queued.prompter,
-        runtime: createRuntimeEnv({ throwOnExit: false }),
-      }),
-    ).rejects.toThrow(
-      "The running Signal daemon may be using this signal-cli config directory. Stop the OpenClaw gateway before changing its signal-cli settings, then retry setup.",
-    );
-
-    expect(mocks.probeSignalTransport).toHaveBeenCalledOnce();
-    expect(mocks.runPluginCommandWithTimeout).not.toHaveBeenCalled();
-    expect(mocks.spawnSignalDaemon).not.toHaveBeenCalled();
-  });
-
-  it("requires the live daemon to stop before switching from an explicit to implicit store", async () => {
-    const queued = createQueuedWizardPrompter();
-
-    await expect(
-      runSetupWizardFinalize({
-        finalize: signalSetupWizard.finalize,
-        cfg: configuredManagedSignalConfig(),
-        accountId: "work",
-        credentialValues: {
-          ...managedSignalCredentialValues,
-          signalCliConfigPath: "",
-        },
-        prompter: queued.prompter,
-        runtime: createRuntimeEnv({ throwOnExit: false }),
-      }),
-    ).rejects.toThrow("The running Signal daemon may be using this signal-cli config directory");
-
-    expect(mocks.probeSignalTransport).toHaveBeenCalledOnce();
-    expect(mocks.runPluginCommandWithTimeout).not.toHaveBeenCalled();
-    expect(mocks.spawnSignalDaemon).not.toHaveBeenCalled();
   });
 
   it("offers the default signal-cli directory as a choice instead of a text answer", async () => {

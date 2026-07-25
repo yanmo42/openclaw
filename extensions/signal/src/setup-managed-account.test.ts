@@ -181,26 +181,76 @@ describe("resolveManagedSignalAccount", () => {
     expect(effectOrder).toEqual(["locked", "shown"]);
   });
 
-  it("continues when signal-cli finishes before the user acknowledges the QR", async () => {
+  it("does not finish linking when the user continues before signal-cli completes", async () => {
+    let complete!: (result: { ok: boolean }) => void;
+    const completion = new Promise<{ ok: boolean }>((resolve) => {
+      complete = resolve;
+    });
+    mocks.linkSignalCliAccount.mockImplementationOnce(async (params) => {
+      await params.onLinkUri("sgnl://linkdevice?uuid=test&pub_key=test", completion);
+      return { ok: true as const, associatedAccount: "+15555550123" };
+    });
     const queued = createQueuedWizardPrompter({ selectValues: ["link"] });
-    const qrCode = vi.fn(async () => await new Promise<boolean>(() => {}));
+    const qrCode = vi.fn(async () => true);
 
-    await expect(
-      resolveManagedSignalAccount({
-        transport: {
-          kind: "managed-native",
-          baseUrl: "http://127.0.0.1:8080",
-          cliPath: "/opt/openclaw/signal-cli",
-          configPath: "/var/lib/signal-cli",
-          httpHost: "127.0.0.1",
-          httpPort: 8080,
-          startupTimeoutMs: 30_000,
-        },
-        selectionMode: "choose",
-        prompter: { ...queued.prompter, qrCode },
-      }),
-    ).resolves.toEqual({ account: "+15555550123", linked: true });
+    const resolution = resolveManagedSignalAccount({
+      transport: {
+        kind: "managed-native",
+        baseUrl: "http://127.0.0.1:8080",
+        cliPath: "/opt/openclaw/signal-cli",
+        configPath: "/var/lib/signal-cli",
+        httpHost: "127.0.0.1",
+        httpPort: 8080,
+        startupTimeoutMs: 30_000,
+      },
+      selectionMode: "choose",
+      prompter: { ...queued.prompter, qrCode },
+    });
+    let resolved = false;
+    void resolution.then(() => {
+      resolved = true;
+    });
 
+    await vi.waitFor(() => expect(qrCode).toHaveBeenCalledOnce());
+    await Promise.resolve();
+    const resolvedBeforeCompletion = resolved;
+    complete({ ok: true });
+
+    await expect(resolution).resolves.toEqual({ account: "+15555550123", linked: true });
+    expect(resolvedBeforeCompletion).toBe(false);
+  });
+
+  it("waits for user acknowledgement after signal-cli finishes", async () => {
+    const queued = createQueuedWizardPrompter({ selectValues: ["link"] });
+    let confirm!: (confirmed: boolean) => void;
+    const confirmation = new Promise<boolean>((resolve) => {
+      confirm = resolve;
+    });
+    const qrCode = vi.fn(async () => await confirmation);
+
+    const resolution = resolveManagedSignalAccount({
+      transport: {
+        kind: "managed-native",
+        baseUrl: "http://127.0.0.1:8080",
+        cliPath: "/opt/openclaw/signal-cli",
+        configPath: "/var/lib/signal-cli",
+        httpHost: "127.0.0.1",
+        httpPort: 8080,
+        startupTimeoutMs: 30_000,
+      },
+      selectionMode: "choose",
+      prompter: { ...queued.prompter, qrCode },
+    });
+    let resolved = false;
+    void resolution.then(() => {
+      resolved = true;
+    });
+
+    await vi.waitFor(() => expect(qrCode).toHaveBeenCalledOnce());
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+    confirm(true);
+    await expect(resolution).resolves.toEqual({ account: "+15555550123", linked: true });
     expect(qrCode).toHaveBeenCalledOnce();
   });
 

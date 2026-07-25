@@ -470,6 +470,79 @@ describe("runSystemAgentTui", () => {
     expect(dispose).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps a cancellation-locked setup recoverable when the TUI throws", async () => {
+    const dispose = vi.fn().mockResolvedValue(true).mockResolvedValueOnce(false);
+    const runTui = vi
+      .fn()
+      .mockImplementationOnce(async (opts) => {
+        const backend = opts.backend as unknown as {
+          engine: { dispose: typeof dispose };
+        };
+        backend.engine.dispose = dispose;
+        throw new Error("terminal failed");
+      })
+      .mockResolvedValueOnce({ exitReason: "exit" as const });
+    const verified = await createVerifiedTuiOptions({ loadOverview: async () => overview });
+
+    await expect(runSystemAgentTui({ ...verified, runTui }, createRuntime())).rejects.toThrow(
+      "terminal failed",
+    );
+
+    expect(runTui).toHaveBeenCalledTimes(2);
+    expect(runTui.mock.calls[0]?.[0].backend).toBe(runTui.mock.calls[1]?.[0].backend);
+    expect(dispose).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns the first TUI error after a locked session can finally be disposed", async () => {
+    const dispose = vi
+      .fn()
+      .mockResolvedValue(true)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false);
+    let runCount = 0;
+    const runTui = vi.fn(async (opts) => {
+      const backend = opts.backend as unknown as {
+        engine: { dispose: typeof dispose };
+      };
+      backend.engine.dispose = dispose;
+      runCount += 1;
+      throw new Error(runCount === 1 ? "terminal failed" : "terminal still failing");
+    });
+    const verified = await createVerifiedTuiOptions({ loadOverview: async () => overview });
+
+    await expect(runSystemAgentTui({ ...verified, runTui }, createRuntime())).rejects.toThrow(
+      "terminal failed",
+    );
+
+    expect(runTui).toHaveBeenCalledTimes(4);
+    expect(runTui.mock.calls[0]?.[0].backend).toBe(runTui.mock.calls[3]?.[0].backend);
+    expect(dispose).toHaveBeenCalledTimes(4);
+  });
+
+  it("reopens after repeated normal exits until locked setup can be disposed", async () => {
+    const dispose = vi
+      .fn()
+      .mockResolvedValue(true)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false);
+    const runTui = vi.fn(async (opts) => {
+      const backend = opts.backend as unknown as {
+        engine: { dispose: typeof dispose };
+      };
+      backend.engine.dispose = dispose;
+      return { exitReason: "exit" as const };
+    });
+    const verified = await createVerifiedTuiOptions({ loadOverview: async () => overview });
+
+    await runSystemAgentTui({ ...verified, runTui }, createRuntime());
+
+    expect(runTui).toHaveBeenCalledTimes(4);
+    expect(runTui.mock.calls[0]?.[0].backend).toBe(runTui.mock.calls[3]?.[0].backend);
+    expect(dispose).toHaveBeenCalledTimes(4);
+  });
+
   it("launches setup handoffs after the chat TUI is disposed", async () => {
     const cases: Array<{
       handoff: Extract<SystemAgentOperation, { kind: "open-setup" }>;

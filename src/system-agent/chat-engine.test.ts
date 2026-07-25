@@ -1172,6 +1172,57 @@ describe("SystemAgentChatEngine", () => {
     expect(mocks.writeWizardConfigFile).toHaveBeenCalledOnce();
   });
 
+  it("does not cross the durable setup boundary after cancellation wins during inference", async () => {
+    useTempStateDir();
+    const verifiedInference = await createAmbientVerifiedBinding(sharedVerifiedInferenceConfig);
+    let pausePersistentRead = false;
+    let releasePersistentRead: (() => void) | undefined;
+    let markPersistentReadStarted: (() => void) | undefined;
+    const persistentReadStarted = new Promise<void>((resolve) => {
+      markPersistentReadStarted = resolve;
+    });
+    const persistentReadReleased = new Promise<void>((resolve) => {
+      releasePersistentRead = resolve;
+    });
+    const durableEffect = vi.fn();
+    const readConfigFileSnapshot = vi.fn(async () => {
+      if (pausePersistentRead) {
+        markPersistentReadStarted?.();
+        await persistentReadReleased;
+      }
+      return configSnapshot(sharedVerifiedInferenceConfig);
+    });
+    const engine = new SystemAgentChatEngine({
+      surface: "gateway",
+      verifiedInference,
+      runAgentTurn: async () => null,
+      planWithAssistant: async () => null,
+      deps: {
+        loadOverview: fakeOverviewLoader(),
+        readConfigFileSnapshot: readConfigFileSnapshot as never,
+      },
+      runChannelSetupWizard: async (_channel, _prompter, beforePersistentApply) => {
+        pausePersistentRead = true;
+        await beforePersistentApply({
+          log: () => {},
+          error: () => {},
+          exit: () => {},
+        });
+        durableEffect();
+      },
+    });
+
+    const setup = engine.handle("connect signal");
+    await persistentReadStarted;
+    await expect(engine.dispose()).resolves.toBe(true);
+    releasePersistentRead?.();
+
+    await expect(setup).resolves.toMatchObject({
+      text: expect.stringContaining("Channel setup cancelled"),
+    });
+    expect(durableEffect).not.toHaveBeenCalled();
+  });
+
   it("accepts a locked wizard answer after its inference route disappears", async () => {
     useTempStateDir();
     let inferenceConfig: OpenClawConfig = structuredClone(sharedVerifiedInferenceConfig);
@@ -1403,12 +1454,50 @@ describe("SystemAgentChatEngine", () => {
 
     const prompt = await engine.handle("connect signal");
     const disposedWhileLocked = await engine.dispose();
+    const resumed = await engine.resumeLockedHostedWizard();
     const completion = await engine.handle("continue");
 
     expect(prompt.qrCodePngBase64).toBe("cG5n");
     expect(disposedWhileLocked).toBe(false);
+    expect(resumed?.qrCodePngBase64).toBe("cG5n");
     expect(completed).toHaveBeenCalledOnce();
     expect(completion.text).toContain("Done — signal is configured.");
+    await expect(engine.dispose()).resolves.toBe(true);
+  });
+
+  it("re-projects a locked QR wizard for a same-owner reconnect", async () => {
+    useTempStateDir();
+    const engine = new SystemAgentChatEngine({
+      surface: "gateway",
+      supportsQrCode: true,
+      runAgentTurn: async () => null,
+      planWithAssistant: async () => null,
+      deps: { loadOverview: fakeOverviewLoader() },
+      runChannelSetupWizard: async (_channel, prompter, beforePersistentApply) => {
+        await beforePersistentApply({
+          log: () => {},
+          error: () => {},
+          exit: () => {},
+        });
+        await prompter.qrCode?.({
+          title: "Signal account linking",
+          message: "Confirm the linked device",
+          pngBase64: "cG5n",
+        });
+      },
+    });
+
+    await engine.handle("connect signal");
+    await expect(engine.dispose()).resolves.toBe(false);
+
+    expect(engine.hasLockedHostedWizard()).toBe(true);
+    await expect(engine.resumeLockedHostedWizard()).resolves.toMatchObject({
+      text: expect.stringContaining("Confirm the linked device"),
+      action: "none",
+      wizardInputPending: true,
+      qrCodePngBase64: "cG5n",
+    });
+    await engine.handle("continue");
     await expect(engine.dispose()).resolves.toBe(true);
   });
 
@@ -1437,6 +1526,34 @@ describe("SystemAgentChatEngine", () => {
 
       await vi.advanceTimersByTimeAsync(25 * 60 * 1000);
 
+      await expect(engine.dispose()).resolves.toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports hosted wizard cancellation when a cached prompt expires", async () => {
+    vi.useFakeTimers();
+    try {
+      useTempStateDir();
+      const engine = new SystemAgentChatEngine({
+        surface: "gateway",
+        runAgentTurn: async () => null,
+        planWithAssistant: async () => null,
+        deps: { loadOverview: fakeOverviewLoader() },
+        runChannelSetupWizard: async (_channel, prompter) => {
+          await prompter.text({ message: "Signal account" });
+        },
+      });
+
+      const prompt = await engine.handle("connect signal");
+      expect(prompt.text).toContain("Signal account");
+
+      await vi.advanceTimersByTimeAsync(25 * 60 * 1000);
+
+      await expect(engine.handle("+15555550123")).resolves.toMatchObject({
+        text: expect.stringContaining("Channel setup cancelled"),
+      });
       await expect(engine.dispose()).resolves.toBe(true);
     } finally {
       vi.useRealTimers();

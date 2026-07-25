@@ -495,6 +495,25 @@ export class SystemAgentChatEngine {
     return true;
   }
 
+  hasLockedHostedWizard(): boolean {
+    return this.wizardBridge?.session.isCancellationLocked() === true;
+  }
+
+  async resumeLockedHostedWizard(): Promise<SystemAgentChatReply | null> {
+    const turn = this.turnQueue.then(async () => {
+      if (!this.hasLockedHostedWizard()) {
+        return null;
+      }
+      const reply: SystemAgentChatReply = {
+        text: await this.pumpWizardBridge(),
+        action: "none",
+      };
+      return this.projectWizardReply(reply);
+    });
+    this.turnQueue = turn.catch(() => undefined);
+    return await turn;
+  }
+
   async handle(text: string): Promise<SystemAgentChatReply> {
     const turn = this.turnQueue.then(() => this.handleSerialized(text));
     // The queue must survive a failed turn or every later message would reject.
@@ -521,6 +540,10 @@ export class SystemAgentChatEngine {
     }
     // While a hosted wizard awaits a step, every turn routes to it, so the
     // awaited step is always the question this reply asks.
+    return this.projectWizardReply(reply);
+  }
+
+  private projectWizardReply(reply: SystemAgentChatReply): SystemAgentChatReply {
     const question = wizardStepChatQuestion(this.wizardBridge?.step ?? null);
     return {
       ...reply,
@@ -1195,7 +1218,10 @@ export class SystemAgentChatEngine {
           prompter,
           async (runtime) => {
             await beforePersistentApply(runtime);
-            wizardSession.lockCancellation();
+            signal.throwIfAborted();
+            if (!wizardSession.lockCancellation()) {
+              throw new Error("Channel setup was cancelled before its persistent change started.");
+            }
           },
           signal,
         ),
@@ -1324,6 +1350,12 @@ export class SystemAgentChatEngine {
     const bridge = this.wizardBridge;
     if (!bridge) {
       return "";
+    }
+    if (!bridge.session.isRunning()) {
+      // Expiry clears the session-owned answer but cannot reach this cached
+      // projection. Surface the terminal result before handling a stale step.
+      bridge.step = null;
+      return await this.pumpWizardBridge();
     }
     if (/^(cancel|abort|stop|quit|exit)$/i.test(text.trim())) {
       if (!bridge.session.cancel()) {

@@ -165,23 +165,19 @@ async function linkManagedSignalAccount(params: {
           // Signal may persist the linked device as soon as the phone approves
           // this QR, so cancellation must lock before the code becomes visible.
           await params.beforePersistentEffect?.();
-          const outcome = await Promise.race([
-            params.prompter
-              .qrCode({
-                title: "Signal account linking",
-                message: [
-                  instructions,
-                  "Scan this QR code, approve the linked device in Signal, then choose Continue.",
-                ].join("\n"),
-                pngBase64: await renderQrPngBase64(uri),
-                dismissWhen: completion,
-              })
-              .then((confirmed) => ({ source: "user" as const, confirmed })),
-            completion.then((result) => ({ source: "signal-cli" as const, ...result })),
-          ]);
-          if (outcome.source === "user" && !outcome.confirmed) {
+          const confirmed = await params.prompter.qrCode({
+            title: "Signal account linking",
+            message: [
+              instructions,
+              "Scan this QR code, approve the linked device in Signal, then choose Continue.",
+            ].join("\n"),
+            pngBase64: await renderQrPngBase64(uri),
+            dismissWhen: completion,
+          });
+          if (!confirmed) {
             throw new Error("Signal account linking was not confirmed.");
           }
+          await completion;
           return;
         }
         const qr = await renderSignalLinkQr(uri);

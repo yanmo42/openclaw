@@ -1,4 +1,3 @@
-/* oxlint-disable max-lines -- Gateway chat integration tests share one module-mock harness. */
 // OpenClaw gateway tests cover activation serialization and chat sessions.
 
 import { expectDefined } from "@openclaw/normalization-core";
@@ -12,7 +11,6 @@ import { defaultRuntime } from "../../runtime.js";
 import { SystemAgentChatEngine } from "../../system-agent/chat-engine.js";
 import { SystemAgentInferenceUnavailableError } from "../../system-agent/inference-error.js";
 import { createSystemAgentVerifiedInferenceTestFixture } from "../../system-agent/system-agent.test-helpers.js";
-import * as verifiedInferenceRuntime from "../../system-agent/verified-inference.js";
 import type {
   SystemAgentVerifiedInferenceBinding,
   SystemAgentVerifiedInferenceDeps,
@@ -57,10 +55,6 @@ const greetingMocks = vi.hoisted(() => ({
 const onboardingWelcomeMocks = vi.hoisted(() => ({
   buildOnboardingWelcome: vi.fn(),
 }));
-const onboardChannelsMocks = vi.hoisted(() => ({
-  setupChannels: vi.fn(),
-  runCollectedChannelOnboardingPostWriteHooks: vi.fn(async () => undefined),
-}));
 
 vi.mock("../../system-agent/setup-inference.js", () => ({
   activateSetupInference: setupInferenceMocks.activateSetupInference,
@@ -93,15 +87,6 @@ vi.mock("../../system-agent/greeting.js", async (importOriginal) => {
 });
 vi.mock("../../system-agent/onboarding-welcome.js", () => ({
   buildOnboardingWelcome: onboardingWelcomeMocks.buildOnboardingWelcome,
-}));
-vi.mock("../../commands/onboard-channels.js", () => ({
-  createChannelOnboardingPostWriteHookCollector: () => ({
-    collect: vi.fn(),
-    drain: () => [],
-  }),
-  runCollectedChannelOnboardingPostWriteHooks:
-    onboardChannelsMocks.runCollectedChannelOnboardingPostWriteHooks,
-  setupChannels: onboardChannelsMocks.setupChannels,
 }));
 
 type RespondCall = {
@@ -240,8 +225,6 @@ beforeEach(async () => {
   onboardingWelcomeMocks.buildOnboardingWelcome.mockReset().mockResolvedValue({
     text: "Inference is ready. Let's finish setup.",
   });
-  onboardChannelsMocks.setupChannels.mockReset();
-  onboardChannelsMocks.runCollectedChannelOnboardingPostWriteHooks.mockClear();
 });
 
 afterEach(() => {
@@ -745,77 +728,6 @@ describe("openclaw.chat", () => {
     expect(JSON.stringify(persisted)).not.toContain("raw-secret-value");
   });
 
-  it("negotiates hosted-wizard QR images for fresh and reset chat sessions", async () => {
-    stubEngineOverview();
-    vi.spyOn(
-      verifiedInferenceRuntime,
-      "resolveSystemAgentVerifiedInferenceRoute",
-    ).mockResolvedValue(requireVerifiedInferenceFixture().execution);
-    onboardChannelsMocks.setupChannels.mockImplementation(
-      async (cfg: OpenClawConfig, _runtime: unknown, prompter: WizardPrompter) => {
-        await prompter.qrCode?.({
-          title: "Signal account linking",
-          message: "Scan this code, then confirm.",
-          pngBase64: "cG5n",
-        });
-        return cfg;
-      },
-    );
-    const sessions = new Map<string, SystemAgentChatSession>();
-    const context = makeContext(sessions);
-    const params = {
-      sessionId: "fresh-qr",
-      message: "connect signal",
-      capabilities: { qrCodePng: true },
-    };
-
-    const prompt = await callChat(context, params);
-
-    expect(prompt.ok, JSON.stringify(prompt.error)).toBe(true);
-    expect(prompt.payload).toMatchObject({
-      qrCodePngBase64: "cG5n",
-      wizardInputPending: true,
-    });
-
-    const resetPrompt = await callChat(context, { ...params, reset: true });
-
-    expect(resetPrompt.payload).toMatchObject({
-      qrCodePngBase64: "cG5n",
-      wizardInputPending: true,
-    });
-    expect(onboardChannelsMocks.setupChannels).toHaveBeenCalledTimes(2);
-  });
-
-  it.each([
-    { initialQr: true, resumedQr: false },
-    { initialQr: false, resumedQr: true },
-  ])("rejects a session resumed with QR support changed", async ({ initialQr, resumedQr }) => {
-    stubEngineOverview();
-    const sessions = new Map<string, SystemAgentChatSession>();
-    const context = makeContext(sessions);
-    const capabilities = (supported: boolean) =>
-      supported ? { capabilities: { qrCodePng: true } } : {};
-
-    const first = await callChat(context, {
-      sessionId: "qr-capability-change",
-      ...capabilities(initialQr),
-    });
-    const resumed = await callChat(context, {
-      sessionId: "qr-capability-change",
-      message: "continue",
-      ...capabilities(resumedQr),
-    });
-
-    expect(first.ok).toBe(true);
-    expect(resumed).toMatchObject({
-      ok: false,
-      error: {
-        code: "INVALID_REQUEST",
-        message: "OpenClaw chat capabilities changed; retry with reset=true.",
-      },
-    });
-  });
-
   it("returns history oldest-first with default and explicit bounded limits", async () => {
     const turns = [
       { role: "user" as const, text: "one", at: 1 },
@@ -945,31 +857,6 @@ describe("openclaw.chat", () => {
     expect(sessions.has("s1")).toBe(true);
   });
 
-  it("retains a cancellation-locked wizard when inference becomes unavailable", async () => {
-    const engine = makeVerifiedEngine();
-    vi.spyOn(engine, "handle").mockRejectedValue(
-      new SystemAgentInferenceUnavailableError("conversation"),
-    );
-    const dispose = vi.spyOn(engine, "dispose").mockResolvedValue(false);
-    const sessions = new Map<string, SystemAgentChatSession>([["s1", seededSession({ engine })]]);
-
-    const failed = await callChat(makeContext(sessions), {
-      sessionId: "s1",
-      message: "continue",
-    });
-
-    expect(failed).toMatchObject({
-      ok: false,
-      error: {
-        code: "UNAVAILABLE",
-        message: expect.stringContaining("working inference"),
-      },
-    });
-    expect((failed.error as { details?: unknown } | undefined)?.details).toBeUndefined();
-    expect(dispose).toHaveBeenCalledOnce();
-    expect(sessions.get("s1")?.engine).toBe(engine);
-  });
-
   it("does not relabel unrelated session failures as inference errors", async () => {
     const engine = makeVerifiedEngine();
     vi.spyOn(engine, "handle").mockRejectedValue(new Error("wizard bug"));
@@ -1078,58 +965,6 @@ describe("openclaw.chat", () => {
     expect(sessions.has("new-2")).toBe(true);
   });
 
-  it("skips a cancellation-locked wizard when evicting an old chat session", async () => {
-    const locked = seededSession({ lastUsedAt: 0 });
-    const disposeLocked = vi.spyOn(locked.engine, "dispose").mockResolvedValue(false);
-    const evictable = seededSession({ lastUsedAt: 1 });
-    const disposeEvictable = vi.spyOn(evictable.engine, "dispose").mockResolvedValue(true);
-    const sessions = new Map<string, SystemAgentChatSession>([
-      ["locked", locked],
-      ["evictable", evictable],
-    ]);
-    for (let index = 2; index < 8; index += 1) {
-      sessions.set(`existing-${index}`, seededSession({ lastUsedAt: index }));
-    }
-    stubEngineOverview();
-
-    const created = await callChat(makeContext(sessions), { sessionId: "new" });
-
-    expect(created.ok).toBe(true);
-    expect(disposeLocked).toHaveBeenCalledOnce();
-    expect(disposeEvictable).toHaveBeenCalledOnce();
-    expect(sessions.has("locked")).toBe(true);
-    expect(sessions.has("evictable")).toBe(false);
-    expect(sessions.has("new")).toBe(true);
-    expect(sessions.size).toBe(8);
-  });
-
-  it("does not persist a rejected session when every existing setup is locked", async () => {
-    const sessions = new Map<string, SystemAgentChatSession>();
-    for (let index = 0; index < 8; index += 1) {
-      const session = seededSession({ lastUsedAt: index });
-      vi.spyOn(session.engine, "dispose").mockResolvedValue(false);
-      sessions.set(`locked-${index}`, session);
-    }
-    stubEngineOverview();
-
-    const created = await callChat(makeContext(sessions), {
-      sessionId: "new",
-      reset: true,
-    });
-
-    expect(created).toMatchObject({
-      ok: false,
-      error: {
-        code: "UNAVAILABLE",
-        message: "OpenClaw is finishing channel setup. Try again shortly.",
-      },
-    });
-    expect(sessions.size).toBe(8);
-    expect(sessions.has("new")).toBe(false);
-    expect(transcriptStoreMocks.appendTranscriptReset).not.toHaveBeenCalled();
-    expect(transcriptStoreMocks.appendTranscriptTurn).not.toHaveBeenCalled();
-  });
-
   it("resets a session on request", async () => {
     stubEngineOverview();
     transcriptStoreMocks.readTranscriptTail.mockReturnValue([]);
@@ -1173,25 +1008,5 @@ describe("openclaw.chat", () => {
     expect(transcriptStoreMocks.readTranscriptTail).toHaveBeenLastCalledWith(30, {
       afterLastReset: true,
     });
-  });
-
-  it("refuses to reset a cancellation-locked channel setup", async () => {
-    const engine = makeVerifiedEngine();
-    const dispose = vi.spyOn(engine, "dispose").mockResolvedValue(false);
-    const sessions = new Map<string, SystemAgentChatSession>([["s1", seededSession({ engine })]]);
-
-    const reset = await callChat(makeContext(sessions), { sessionId: "s1", reset: true });
-
-    expect(reset).toMatchObject({
-      ok: false,
-      error: {
-        code: "INVALID_REQUEST",
-        message: expect.stringContaining("cannot be reset yet"),
-      },
-    });
-    expect(dispose).toHaveBeenCalledOnce();
-    expect(sessions.get("s1")?.engine).toBe(engine);
-    expect(transcriptStoreMocks.appendTranscriptReset).not.toHaveBeenCalled();
-    expect(setupInferenceMocks.verifySetupInference).not.toHaveBeenCalled();
   });
 });

@@ -126,16 +126,20 @@ type SystemAgentHistoryTurn = {
   text: string;
 };
 
-type GatewaySystemAgentSession = {
+type GatewaySystemAgentChatReply = {
+  text: string;
+  action: "none" | "exit" | "open-tui" | "open-setup";
+  sensitive?: boolean;
+  wizardInputPending?: boolean;
+  qrCodePngBase64?: string;
+  question?: SystemAgentChatQuestion;
+};
+
+export type GatewaySystemAgentSession = {
   engine: {
-    handle: (message: string) => Promise<{
-      text: string;
-      action: "none" | "exit" | "open-tui" | "open-setup";
-      sensitive?: boolean;
-      wizardInputPending?: boolean;
-      qrCodePngBase64?: string;
-      question?: SystemAgentChatQuestion;
-    }>;
+    handle: (message: string) => Promise<GatewaySystemAgentChatReply>;
+    hasLockedHostedWizard: () => boolean;
+    resumeLockedHostedWizard: () => Promise<GatewaySystemAgentChatReply | null>;
     seedHistory: (turns: readonly SystemAgentHistoryTurn[]) => void;
     historyLength: () => number;
     historySince: (index: number) => SystemAgentHistoryTurn[];

@@ -61,7 +61,7 @@ export type WizardQrCodeParams = {
   title: string;
   message: string;
   pngBase64: string;
-  /** Retire the acknowledgement prompt when the external QR operation completes. */
+  /** Accept acknowledgement after the external QR operation settles; the caller owns its result. */
   dismissWhen?: Promise<unknown>;
 };
 

@@ -1,5 +1,6 @@
 // OpenClaw TUI backend runs setup-helper dialogue inside the shared local TUI shell.
 import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import type {
   SessionsPatchParams,
   SessionsPatchResult,
@@ -71,6 +72,7 @@ type SystemAgentTuiRoute = {
 };
 
 const SYSTEM_AGENT_SESSION_KEY = buildAgentMainSessionKey({ agentId: SYSTEM_AGENT_ID });
+const LOCKED_TUI_REOPEN_DELAY_MS = 250;
 
 function createChatEngine(opts: SystemAgentTuiOptions): SystemAgentChatEngine {
   return new SystemAgentChatEngine({
@@ -468,6 +470,8 @@ export async function runSystemAgentTui(
     const runTui = boundOpts.runTui ?? defaultRunTui;
     let disposed = false;
     let shellInitialMessage = initialMessage;
+    let runFailed = false;
+    let runError: unknown;
     while (!disposed) {
       try {
         await runTui({
@@ -480,9 +484,22 @@ export async function runSystemAgentTui(
           ...(shellInitialMessage ? { message: shellInitialMessage } : {}),
         });
         shellInitialMessage = undefined;
+      } catch (error) {
+        if (!runFailed) {
+          runFailed = true;
+          runError = error;
+        }
       } finally {
         disposed = await backend.dispose();
       }
+      if (!disposed) {
+        // A disposal refusal means the durable wizard must retain this prompt
+        // owner. Reopen the same backend until commit or recovery finishes.
+        await delay(LOCKED_TUI_REOPEN_DELAY_MS);
+      }
+    }
+    if (runFailed) {
+      throw runError;
     }
 
     const handoff = backend.consumeHandoff();

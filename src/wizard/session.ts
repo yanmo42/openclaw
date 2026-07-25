@@ -262,17 +262,18 @@ export class WizardSession {
   private currentStep: WizardStep | null = null;
   private progressSteps: WizardStep[] = [];
   private deliveredProgressStepIds = new Set<string>();
-  private retiredAnswerStepIds = new Set<string>();
   private stepDeferred: Deferred<WizardStep | null> | null = null;
   private pendingTerminalResolution = false;
   private cancellationLocked = false;
   private pendingExternalUrl: string | undefined;
+  private readonly resumeKey: string | undefined;
   private answerDeferred = new Map<
     string,
     {
       deferred: Deferred<unknown>;
       text: boolean;
       validate?: (value: string) => string | undefined;
+      externalCompletion?: { settled: boolean };
     }
   >();
   private status: WizardSessionStatus = "running";
@@ -285,10 +286,11 @@ export class WizardSession {
       signal: AbortSignal,
       session: WizardSession,
     ) => Promise<void>,
-    options?: { timeoutMs?: number; supportsQrCode?: boolean },
+    options?: { timeoutMs?: number; supportsQrCode?: boolean; resumeKey?: string },
   ) {
     const prompter = new WizardSessionPrompter(this, options?.supportsQrCode === true);
     this.timeoutMs = options?.timeoutMs;
+    this.resumeKey = options?.resumeKey;
     this.refreshExpiryTimer();
     void this.run(prompter);
   }
@@ -347,12 +349,11 @@ export class WizardSession {
       if (this.deliveredProgressStepIds.delete(stepId)) {
         return undefined;
       }
-      // An external QR completion can advance the runner before the client
-      // retires its cached card. Accept that card's one stale acknowledgement.
-      if (this.retiredAnswerStepIds.delete(stepId)) {
-        return undefined;
-      }
       throw new Error("wizard: no pending step");
+    }
+    this.refreshExpiryTimer();
+    if (pending.externalCompletion && !pending.externalCompletion.settled) {
+      return "Setup is still waiting for the external operation to finish. Complete it, then choose Continue again.";
     }
     const normalizedValue = pending.text ? normalizeTextAnswer(value) : value;
     if (pending.text && normalizedValue === undefined) {
@@ -362,7 +363,6 @@ export class WizardSession {
     if (validationError) {
       return validationError;
     }
-    this.refreshExpiryTimer();
     this.answerDeferred.delete(stepId);
     this.currentStep = null;
     pending.deferred.resolve(normalizedValue);
@@ -374,7 +374,6 @@ export class WizardSession {
       return false;
     }
     if (this.cancellationLocked) {
-      this.continueLockedQrPrompt();
       return false;
     }
     this.finishCancellation();
@@ -414,7 +413,6 @@ export class WizardSession {
     this.answerDeferred.clear();
     this.progressSteps = [];
     this.deliveredProgressStepIds.clear();
-    this.retiredAnswerStepIds.clear();
     this.resolveStep(null);
   }
 
@@ -422,26 +420,25 @@ export class WizardSession {
     return this.status === "running";
   }
 
+  isCancellationLocked(): boolean {
+    return this.status === "running" && this.cancellationLocked;
+  }
+
+  /** A replacement client may reclaim only the flow that created this session. */
+  canResume(resumeKey: string): boolean {
+    return this.status === "running" && this.resumeKey === resumeKey;
+  }
+
   /** The underlying mutation crossed its durable commit point and must finish. */
-  lockCancellation() {
+  lockCancellation(): boolean {
+    if (this.status !== "running") {
+      return false;
+    }
     this.cancellationLocked = true;
     // Give the irreversible operation a complete idle window. Otherwise an
     // operation started near the session deadline can be aborted mid-commit.
     this.refreshExpiryTimer();
-  }
-
-  private continueLockedQrPrompt(): boolean {
-    const step = this.currentStep;
-    if (!step?.qrCodePngBase64) {
-      return false;
-    }
-    const pending = this.answerDeferred.get(step.id);
-    if (!pending) {
-      return false;
-    }
-    // Once a displayed QR can cause an external durable effect, disconnecting
-    // the client must release the prompt so the runner can finish its config commit.
-    return this.retirePendingAnswer(step.id, true);
+    return true;
   }
 
   get signal(): AbortSignal {
@@ -535,36 +532,26 @@ export class WizardSession {
     this.refreshExpiryTimer();
     this.pushStep(step);
     const deferred = createDeferred<unknown>();
-    this.answerDeferred.set(step.id, { deferred, text: step.type === "text", validate });
-    if (dismissWhen) {
-      void dismissWhen.then(() => this.retirePendingAnswer(step.id, true)).catch(() => undefined);
+    const externalCompletion = dismissWhen ? { settled: false } : undefined;
+    this.answerDeferred.set(step.id, {
+      deferred,
+      text: step.type === "text",
+      validate,
+      ...(externalCompletion ? { externalCompletion } : {}),
+    });
+    if (dismissWhen && externalCompletion) {
+      // Settlement only unlocks the next owner acknowledgement. The caller
+      // still awaits the original promise and owns its success or failure.
+      void dismissWhen.then(
+        () => {
+          externalCompletion.settled = true;
+        },
+        () => {
+          externalCompletion.settled = true;
+        },
+      );
     }
     return await deferred.promise;
-  }
-
-  private retirePendingAnswer(stepId: string, value: unknown): boolean {
-    const pending = this.answerDeferred.get(stepId);
-    if (!pending) {
-      return false;
-    }
-    this.answerDeferred.delete(stepId);
-    if (this.currentStep?.id === stepId) {
-      this.currentStep = null;
-    }
-    this.rememberRetiredAnswerStep(stepId);
-    pending.deferred.resolve(value);
-    return true;
-  }
-
-  private rememberRetiredAnswerStep(stepId: string) {
-    this.retiredAnswerStepIds.add(stepId);
-    if (this.retiredAnswerStepIds.size <= 64) {
-      return;
-    }
-    const oldest = this.retiredAnswerStepIds.values().next().value;
-    if (oldest) {
-      this.retiredAnswerStepIds.delete(oldest);
-    }
   }
 
   private resolveStep(step: WizardStep | null) {
