@@ -241,11 +241,15 @@ describe("JSON console style process output", () => {
     expect(messages).not.toContain("tslog: minLevel");
   });
 
-  it("structures container dispatch errors emitted before command routing", async () => {
+  it.each([
+    { name: "plain", modifier: [] },
+    { name: "help-shaped", modifier: ["--help"] },
+    { name: "version-shaped", modifier: ["--version"] },
+  ])("structures $name container dispatch errors emitted before command routing", async ({ modifier }) => {
     let failure: CliProcessFailure | undefined;
     try {
       await runCliProcess({
-        args: ["--container", "openclaw-json-console-missing", "status"],
+        args: ["--container", "openclaw-json-console-missing", "status", ...modifier],
         config: loggingConfig,
       });
     } catch (error) {

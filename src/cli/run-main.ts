@@ -964,25 +964,37 @@ export async function runCli(argv: string[] = process.argv) {
   const originalArgv = normalizeWindowsArgv(argv);
   const startupTrace = createGatewayStartupTrace(originalArgv, "cli.main");
   const originalInvocation = resolveCliArgvInvocation(originalArgv);
-  // Console formatting is a process-wide invariant. Install capture before
-  // container dispatch, argument validation, and command routing can diverge.
-  if (!originalInvocation.hasHelpOrVersion) {
+  const installConsoleCapture = async () => {
     const { enableConsoleCapture } = await loadLoggingModule();
     enableConsoleCapture();
-  }
+  };
   const parsedContainer = parseCliContainerArgs(originalArgv);
   if (!parsedContainer.ok) {
+    await installConsoleCapture();
     throw new Error(parsedContainer.error);
   }
   const parsedProfile = parseCliProfileArgs(parsedContainer.argv);
+  const containerTargetName =
+    parsedContainer.container ??
+    normalizeOptionalString(process.env.OPENCLAW_CONTAINER) ??
+    null;
+  const hasPreHelpValidationError =
+    !parsedProfile.ok || (containerTargetName !== null && parsedProfile.profile !== null);
+  // Console formatting is a process-wide invariant. Install capture before
+  // container dispatch or validation can bypass the pure help/version path.
+  if (
+    !originalInvocation.hasHelpOrVersion ||
+    containerTargetName !== null ||
+    hasPreHelpValidationError
+  ) {
+    await installConsoleCapture();
+  }
   if (!parsedProfile.ok) {
     throw new Error(parsedProfile.error);
   }
   if (parsedProfile.profile) {
     applyCliProfileEnv({ profile: parsedProfile.profile });
   }
-  const containerTargetName =
-    parsedContainer.container ?? normalizeOptionalString(process.env.OPENCLAW_CONTAINER) ?? null;
   if (containerTargetName && parsedProfile.profile) {
     throw new Error("--container cannot be combined with --profile/--dev");
   }
