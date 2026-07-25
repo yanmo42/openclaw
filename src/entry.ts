@@ -43,6 +43,11 @@ async function writeCapturedCliArgumentError(message: string): Promise<void> {
   console.error(`[openclaw] ${message}`);
 }
 
+async function writeCliDiagnosticBlock(message: string): Promise<void> {
+  const { formatConsoleDiagnosticBlock } = await import("./logging/json-console-line.js");
+  process.stderr.write(formatConsoleDiagnosticBlock({ level: "error", message: `${message}\n` }));
+}
+
 function shouldForceReadOnlyAuthStore(argv: string[]): boolean {
   const tokens = argv.slice(2).filter((token) => token.length > 0 && !token.startsWith("-"));
   for (let index = 0; index < tokens.length - 1; index += 1) {
@@ -155,7 +160,7 @@ export async function tryHandleRootHelpFastPath(
     loadRootHelpRenderOptionsForConfigSensitivePlugins?: (
       env?: NodeJS.ProcessEnv,
     ) => Promise<RootHelpRenderOptions | null>;
-    onError?: (error: unknown) => void;
+    onError?: (error: unknown) => void | Promise<void>;
     env?: NodeJS.ProcessEnv;
   } = {},
 ): Promise<boolean> {
@@ -167,11 +172,9 @@ export async function tryHandleRootHelpFastPath(
   }
   const handleError =
     deps.onError ??
-    ((error: unknown) => {
-      console.error(
-        "[openclaw] Failed to display help:",
-        error instanceof Error ? (error.stack ?? error.message) : error,
-      );
+    (async (error: unknown) => {
+      const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
+      await writeCliDiagnosticBlock(`[openclaw] Failed to display help: ${detail}`);
       process.exit(1);
     });
   try {
@@ -192,7 +195,7 @@ export async function tryHandleRootHelpFastPath(
     await outputRootHelp(liveRootHelpOptions ?? undefined);
     return true;
   } catch (error) {
-    handleError(error);
+    await handleError(error);
     return true;
   }
 }
