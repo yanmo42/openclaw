@@ -1,5 +1,6 @@
-import { readLoggingConfig } from "./config.js";
 // Shared JSON console envelope formatting for captured and pre-capture diagnostics.
+import { stripAnsi } from "../../packages/terminal-core/src/ansi.js";
+import { readLoggingConfig } from "./config.js";
 import type { LogLevel } from "./levels.js";
 import { redactSensitiveText } from "./redact.js";
 import { loggingState } from "./state.js";
@@ -27,4 +28,18 @@ export function formatConsoleDiagnosticLine(params: { level: LogLevel; message: 
   const override = loggingState.overrideSettings as { consoleStyle?: unknown } | null;
   const style = override?.consoleStyle ?? readLoggingConfig()?.consoleStyle;
   return style === "json" ? formatJsonConsoleLine(params) : params.message;
+}
+
+/** Preserves human diagnostic blocks while serializing the whole block as one JSONL record. */
+export function formatConsoleDiagnosticBlock(params: { level: LogLevel; message: string }): string {
+  const override = loggingState.overrideSettings as { consoleStyle?: unknown } | null;
+  const style = override?.consoleStyle ?? readLoggingConfig()?.consoleStyle;
+  if (style !== "json") {
+    return params.message;
+  }
+  const trailingNewline = params.message.endsWith("\n") ? "\n" : "";
+  return `${formatJsonConsoleLine({
+    level: params.level,
+    message: stripAnsi(params.message).trimEnd(),
+  })}${trailingNewline}`;
 }

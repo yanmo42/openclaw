@@ -408,4 +408,54 @@ describe("JSON console style process output", () => {
       ]),
     );
   });
+
+  it.each([
+    { name: "routed fallback", env: {} },
+    { name: "Commander", env: { OPENCLAW_DISABLE_ROUTE_FIRST: "1" } },
+  ])("structures $name unknown-option validation", async ({ env }) => {
+    let failure: CliProcessFailure | undefined;
+    try {
+      await runCliProcess({
+        args: ["status", "--definitely-invalid"],
+        config: loggingConfig,
+        env,
+      });
+    } catch (error) {
+      failure = error as CliProcessFailure;
+    }
+
+    expect(failure?.code).toBe(1);
+    expect(failure?.stdout ?? "").toBe("");
+    expect(parseJsonLines(failure?.stderr ?? "")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          level: "error",
+          message: expect.stringContaining("does not recognize option"),
+        }),
+      ]),
+    );
+  });
+
+  it("structures Commander missing-argument validation", async () => {
+    let failure: CliProcessFailure | undefined;
+    try {
+      await runCliProcess({
+        args: ["plugins", "install"],
+        config: loggingConfig,
+        env: { OPENCLAW_DISABLE_ROUTE_FIRST: "1" },
+      });
+    } catch (error) {
+      failure = error as CliProcessFailure;
+    }
+
+    expect(failure?.code).toBe(1);
+    expect(parseJsonLines(failure?.stderr ?? "")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          level: "error",
+          message: expect.stringContaining("Missing required argument"),
+        }),
+      ]),
+    );
+  });
 });
