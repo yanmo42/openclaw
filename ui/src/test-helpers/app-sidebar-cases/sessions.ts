@@ -487,7 +487,7 @@ describe("AppSidebar session mutation feedback", () => {
       { agentId: "main", deferListRefresh: true },
     );
     expect(navigate).toHaveBeenLastCalledWith("chat", {
-      search: "?session=agent%3Amain%3Aa",
+      pathname: "/chat/main/00000002",
     });
   });
 
