@@ -409,6 +409,278 @@
         }
       }
     },
+    "%1$lld Running · %2$lld Done · %3$lld Failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld Running · %2$lld Done · %3$lld Failed"
+          }
+        },
+        "zh-CN": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld 运行中 · %2$lld 已完成 · %3$lld 失败"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld 執行中 · %2$lld 已完成 · %3$lld 失敗"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld Em execução · %2$lld Concluído · %3$lld Falhou"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld laufen · %2$lld fertig · %3$lld fehlgeschlagen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld en ejecución · %2$lld completados · %3$lld fallidos"
+          }
+        },
+        "ja-JP": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld 実行中 · %2$lld 完了 · %3$lld 失敗"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld 실행 중 · %2$lld 완료 · %3$lld 실패"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld en cours · %2$lld terminés · %3$lld échoués"
+          }
+        },
+        "hi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld चालू · %2$lld पूर्ण · %3$lld विफल"
+          }
+        },
+        "ar": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld قيد التشغيل · %2$lld مكتمل · %3$lld فشل"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld In esecuzione · %2$lld Completati · %3$lld Falliti"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld Çalışıyor · %2$lld Tamamlandı · %3$lld Başarısız"
+          }
+        },
+        "uk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld виконується · %2$lld завершено · %3$lld помилок"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld Berjalan · %2$lld Selesai · %3$lld Gagal"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld Uruchomione · %2$lld Zakończone · %3$lld Nieudane"
+          }
+        },
+        "th": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld กำลังทำงาน · %2$lld เสร็จสิ้น · %3$lld ล้มเหลว"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld Đang chạy · %2$lld Hoàn tất · %3$lld Thất bại"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld actief · %2$lld klaar · %3$lld mislukt"
+          }
+        },
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld در حال اجرا · %2$lld انجام‌شده · %3$lld ناموفق"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld выполняется · %2$lld завершено · %3$lld не удалось"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld körs · %2$lld klara · %3$lld misslyckades"
+          }
+        }
+      }
+    },
+    "%1$lld more workers": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld more workers"
+          }
+        },
+        "zh-CN": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "还有 %1$lld 个 worker"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "還有 %1$lld 個工作站"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mais %1$lld workers"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld weitere Worker"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld trabajadores más"
+          }
+        },
+        "ja-JP": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "他 %1$lld 件のワーカー"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "워커 %1$lld개 더"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld workers de plus"
+          }
+        },
+        "hi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld और workers"
+          }
+        },
+        "ar": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld عمال إضافيون"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld altri worker"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld çalışan daha"
+          }
+        },
+        "uk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ще %1$lld воркерів"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld worker lagi"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld dodatkowych procesów roboczych"
+          }
+        },
+        "th": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "อีก %1$lld workers"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Thêm %1$lld worker"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld werkers meer"
+          }
+        },
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld کارگر دیگر"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ещё %1$lld воркеров"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld arbetare till"
+          }
+        }
+      }
+    },
     "%@ (override)": {
       "localizations": {
         "en": {
@@ -6797,6 +7069,142 @@
           "stringUnit": {
             "state": "new",
             "value": "'queued', 'sending', 'awaiting_confirmation', 'failed'"
+          }
+        }
+      }
+    },
+    "1 more worker": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 more worker"
+          }
+        },
+        "zh-CN": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "还有 1 个 worker"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "還有 1 個工作站"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mais 1 worker"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 weiterer Worker"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 trabajador más"
+          }
+        },
+        "ja-JP": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "他 1 件のワーカー"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "워커 1개 더"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 worker de plus"
+          }
+        },
+        "hi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 और worker"
+          }
+        },
+        "ar": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "عامل إضافي واحد"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 altro worker"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 çalışan daha"
+          }
+        },
+        "uk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ще 1 воркер"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 worker lagi"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 dodatkowy proces roboczy"
+          }
+        },
+        "th": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "อีก 1 worker"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Thêm 1 worker"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 werker meer"
+          }
+        },
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "۱ کارگر دیگر"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ещё 1 воркер"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 arbetare till"
           }
         }
       }
@@ -174353,6 +174761,142 @@
         }
       }
     },
+    "Swarm": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Swarm"
+          }
+        },
+        "zh-CN": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Swarm"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Swarm"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Swarm"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Swarm"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Swarm"
+          }
+        },
+        "ja-JP": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Swarm"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Swarm"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Essaim"
+          }
+        },
+        "hi": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Swarm"
+          }
+        },
+        "ar": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "السرب"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Swarm"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sürü"
+          }
+        },
+        "uk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Рій"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Swarm"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rój"
+          }
+        },
+        "th": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Swarm"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Swarm"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Swarm"
+          }
+        },
+        "fa": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Swarm"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Рой"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Swarm"
+          }
+        }
+      }
+    },
     "Switch Gateway": {
       "localizations": {
         "en": {
@@ -192845,6 +193389,142 @@
           "stringUnit": {
             "state": "translated",
             "value": "Okänd"
+          }
+        }
+      }
+    },
+    "Unphased": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unphased"
+          }
+        },
+        "zh-CN": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未分阶段"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未分階段"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sem fase"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Unphased"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sin fase"
+          }
+        },
+        "ja-JP": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未分類"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Unphased"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sans phase"
+          }
+        },
+        "hi": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Unphased"
+          }
+        },
+        "ar": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "غير مُقسّم"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Non suddiviso"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fazsız"
+          }
+        },
+        "uk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Без фаз"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Unphased"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bez fazy"
+          }
+        },
+        "th": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Unphased"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Unphased"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ongefaseerd"
+          }
+        },
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "بدون فاز"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Без фаз"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ofasad"
           }
         }
       }
