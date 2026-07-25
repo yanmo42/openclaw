@@ -302,7 +302,7 @@ export {
   scopedAgentListParamsForRefreshTarget,
   scopedAgentListParamsForSession,
   scopedAgentParamsForSession,
-  searchForSession,
+  pathForSessionKey,
   visibleSessionMatches,
 } from "./navigation.ts";
 export type {

@@ -249,7 +249,7 @@ export abstract class ChatPaneBoard extends ChatPaneHistory {
       provider,
       snapshot,
       hasBoard,
-      face: hasBoard ? (saved?.face ?? "chat") : "chat",
+      face: hasBoard ? this.routeFace : "chat",
       activeTabId,
       activeTabReadOnly,
       dock,
@@ -259,6 +259,14 @@ export abstract class ChatPaneBoard extends ChatPaneHistory {
   }
 
   protected persistBoardSessionView(patch: Partial<BoardSessionView>): void {
+    if (patch.face) {
+      this.onFaceChange?.(patch.face);
+    }
+    const persistedPatch = { ...patch };
+    delete persistedPatch.face;
+    if (Object.keys(persistedPatch).length === 0) {
+      return;
+    }
     const board = this.resolveBoardView();
     const sessionKey = this.resolveBoardSessionKey(board.snapshot.sessionKey);
     if (!sessionKey) {
@@ -271,7 +279,7 @@ export abstract class ChatPaneBoard extends ChatPaneHistory {
       ...persistedSettings.boardSessionViews,
     };
     const next = patchSettings({
-      boardSessionViews: updateBoardSessionView(boardSessionViews, sessionKey, patch),
+      boardSessionViews: updateBoardSessionView(boardSessionViews, sessionKey, persistedPatch),
     });
     if (this.state) {
       this.state.settings = next;

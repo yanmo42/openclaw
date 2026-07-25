@@ -56,14 +56,37 @@ function isDefinitiveNoCreateHttpError(error: unknown): boolean {
 export function controlSessionUrl(
   baseUrl: string | undefined,
   sessionKey: string,
+  sessionId?: string,
+  displayName?: string,
 ): string | undefined {
   if (!baseUrl) {
     return undefined;
   }
+  const keyParts = sessionKey.split(":");
+  const agentId = keyParts[0] === "agent" && keyParts[1] ? keyParts[1] : "main";
+  const rest = keyParts.slice(2).join(":").toLowerCase();
+  const isMain = sessionKey === "main" || sessionKey === "global" || rest === "main";
+  const normalizedSessionId = sessionId?.toLowerCase().replaceAll("-", "") ?? "";
+  if (!isMain && !/^[0-9a-f]{8,32}$/.test(normalizedSessionId)) {
+    return undefined;
+  }
+  const slugTokens = (displayName ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .split("-")
+    .filter(Boolean);
+  while (slugTokens.length > 0 && /^[0-9a-f]+$/.test(slugTokens.at(-1) ?? "")) {
+    slugTokens.pop();
+  }
+  const slug = slugTokens.join("-").slice(0, 48).replace(/-+$/g, "");
+  const shortId = normalizedSessionId.slice(0, 8);
+  const sessionRef = slug ? `${slug}-${shortId}` : shortId;
   const url = new URL(baseUrl);
-  url.pathname = `${url.pathname.replace(/\/+$/u, "")}/chat`;
+  url.pathname = `${url.pathname.replace(/\/+$/u, "")}/chat/${encodeURIComponent(agentId)}${
+    isMain ? "" : `/${sessionRef}`
+  }`;
   url.hash = "";
-  url.searchParams.set("session", sessionKey);
   return url.toString();
 }
 
@@ -201,7 +224,12 @@ export async function openClickClackDiscussionBinding(
 
   const label = resolveDiscussionLabel(entry.label, sessionKey);
   const section = entry.category?.trim() || account.discussions.section;
-  const externalUrl = controlSessionUrl(account.discussions.controlUrlBase, sessionKey);
+  const externalUrl = controlSessionUrl(
+    account.discussions.controlUrlBase,
+    sessionKey,
+    entry.sessionId,
+    label,
+  );
   const archived = entry.archivedAt !== undefined;
   return await params.withChannelMutationLock(async () => {
     if (!store.hasCapacity(sessionKey)) {
@@ -381,7 +409,7 @@ export async function openClickClackDiscussionBinding(
     }
     const nextBinding: ClickClackDiscussionBinding = {
       accountId: account.accountId,
-      agentId: resolveAgentIdFromSessionKey(sessionKey),
+      agentId: resolveAgentIdFromSessionKey(sessionKey, account.agentId ?? "main"),
       sessionId: entry.sessionId,
       serverBaseUrl,
       credentialFingerprint,
