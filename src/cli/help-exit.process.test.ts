@@ -201,6 +201,16 @@ describe("JSON console style process output", () => {
     expect(output).not.toHaveProperty("message");
   });
 
+  it("keeps typed recommendation machine output as a raw array", async () => {
+    const result = await runCliProcess({
+      args: ["onboard", "recommendations", "--json"],
+      config: loggingConfig,
+    });
+
+    expect(result.stderr).toBe("");
+    expect(JSON.parse(result.stdout)).toEqual([]);
+  });
+
   it("structures invalid log-level environment warnings", async () => {
     const result = await runCliProcess({
       args: ["status", "--timeout", "1000"],
