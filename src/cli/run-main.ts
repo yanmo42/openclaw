@@ -975,9 +975,7 @@ export async function runCli(argv: string[] = process.argv) {
   }
   const parsedProfile = parseCliProfileArgs(parsedContainer.argv);
   const containerTargetName =
-    parsedContainer.container ??
-    normalizeOptionalString(process.env.OPENCLAW_CONTAINER) ??
-    null;
+    parsedContainer.container ?? normalizeOptionalString(process.env.OPENCLAW_CONTAINER) ?? null;
   const hasPreHelpValidationError =
     !parsedProfile.ok || (containerTargetName !== null && parsedProfile.profile !== null);
   // Console formatting is a process-wide invariant. Install capture before

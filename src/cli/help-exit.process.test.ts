@@ -245,28 +245,31 @@ describe("JSON console style process output", () => {
     { name: "plain", modifier: [] },
     { name: "help-shaped", modifier: ["--help"] },
     { name: "version-shaped", modifier: ["--version"] },
-  ])("structures $name container dispatch errors emitted before command routing", async ({ modifier }) => {
-    let failure: CliProcessFailure | undefined;
-    try {
-      await runCliProcess({
-        args: ["--container", "openclaw-json-console-missing", "status", ...modifier],
-        config: loggingConfig,
-      });
-    } catch (error) {
-      failure = error as CliProcessFailure;
-    }
+  ])(
+    "structures $name container dispatch errors emitted before command routing",
+    async ({ modifier }) => {
+      let failure: CliProcessFailure | undefined;
+      try {
+        await runCliProcess({
+          args: ["--container", "openclaw-json-console-missing", "status", ...modifier],
+          config: loggingConfig,
+        });
+      } catch (error) {
+        failure = error as CliProcessFailure;
+      }
 
-    expect(failure?.code).toBe(1);
-    expect(failure?.stdout ?? "").toBe("");
-    const records = parseJsonLines(failure?.stderr ?? "");
-    expect(records.length).toBeGreaterThan(0);
-    expect(records).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          level: "error",
-          message: expect.stringContaining("No running container matched"),
-        }),
-      ]),
-    );
-  });
+      expect(failure?.code).toBe(1);
+      expect(failure?.stdout ?? "").toBe("");
+      const records = parseJsonLines(failure?.stderr ?? "");
+      expect(records.length).toBeGreaterThan(0);
+      expect(records).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            level: "error",
+            message: expect.stringContaining("No running container matched"),
+          }),
+        ]),
+      );
+    },
+  );
 });
