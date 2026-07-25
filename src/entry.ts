@@ -75,18 +75,23 @@ if (
 } else {
   const entryFile = fileURLToPath(import.meta.url);
   const installRoot = resolveEntryInstallRoot(entryFile);
+  process.title = "openclaw";
+  ensureOpenClawExecMarkerOnProcess();
+  installProcessWarningFilter();
+  normalizeEnv();
+  process.argv = normalizeWindowsArgv(process.argv);
+  const earlyProfile = parseCliProfileArgs(process.argv);
+  if (earlyProfile.ok && earlyProfile.profile) {
+    applyCliProfileEnv({ profile: earlyProfile.profile });
+  }
+  const { assertSupportedRuntime } = await import("./infra/runtime-guard.js");
+  assertSupportedRuntime();
+
   const waitingForCompileCacheRespawn = respawnWithoutOpenClawCompileCacheIfNeeded({
     currentFile: entryFile,
     installRoot,
   });
   if (!waitingForCompileCacheRespawn) {
-    process.title = "openclaw";
-    ensureOpenClawExecMarkerOnProcess();
-    installProcessWarningFilter();
-    normalizeEnv();
-    const { assertSupportedRuntime } = await import("./infra/runtime-guard.js");
-    assertSupportedRuntime();
-
     enableOpenClawCompileCache({
       installRoot,
     });
@@ -112,13 +117,7 @@ if (
       return true;
     }
 
-    process.argv = normalizeWindowsArgv(process.argv);
-
     if (!ensureCliRespawnReady()) {
-      const earlyProfile = parseCliProfileArgs(process.argv);
-      if (earlyProfile.ok && earlyProfile.profile) {
-        applyCliProfileEnv({ profile: earlyProfile.profile });
-      }
       await configureGatewayStartupTraceConsoleFormatting(gatewayEntryStartupTrace);
       const parsedContainer = parseCliContainerArgs(process.argv);
       if (!parsedContainer.ok) {

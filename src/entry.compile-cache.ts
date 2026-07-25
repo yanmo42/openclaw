@@ -10,6 +10,7 @@ import {
   isTerminalInteractiveRespawnArgv,
   shouldKeepNativeHookRelayInProcess,
 } from "./cli/respawn-policy.js";
+import { formatConsoleDiagnosticBlock } from "./logging/json-console-line.js";
 import { attachChildProcessBridge } from "./process/child-process-bridge.js";
 import {
   runRespawnChildWithSignalBridge,
@@ -202,7 +203,8 @@ function runOpenClawCompileCacheRespawnPlan(
     spawn,
     attachChildProcessBridge,
     exit: process.exit.bind(process) as (code?: number) => never,
-    writeError: (message: string) => process.stderr.write(message),
+    writeError: (message: string) =>
+      process.stderr.write(formatConsoleDiagnosticBlock({ level: "error", message })),
   },
 ): ChildProcess {
   return runRespawnChildWithSignalBridge({

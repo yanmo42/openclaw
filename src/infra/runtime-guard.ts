@@ -1,13 +1,18 @@
 // Validates the current runtime against OpenClaw's Node engine floor.
 import process from "node:process";
+import { format } from "node:util";
 import { expectDefined } from "@openclaw/normalization-core";
+import { formatConsoleDiagnosticBlock } from "../logging/json-console-line.js";
 import type { RuntimeEnv } from "../runtime.js";
 
-// Runtime validation precedes terminal setup. Keep this default path from
-// pulling terminal-core into every CLI startup command.
+// Runtime validation precedes console capture. Keep this direct sink aligned
+// with configured JSONL output without pulling in the full logger.
 const defaultRuntime: RuntimeEnv = {
   log: (...args) => console.log(...args),
-  error: (...args) => console.error(...args),
+  error: (...args) => {
+    const message = format(...args);
+    process.stderr.write(formatConsoleDiagnosticBlock({ level: "error", message: `${message}\n` }));
+  },
   exit: (code) => {
     process.exit(code);
   },

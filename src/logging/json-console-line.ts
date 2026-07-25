@@ -1,5 +1,5 @@
 // Shared JSON console envelope formatting for captured and pre-capture diagnostics.
-import { stripAnsi } from "../../packages/terminal-core/src/ansi.js";
+import { stripVTControlCharacters } from "node:util";
 import { readLoggingConfig } from "./config.js";
 import type { LogLevel } from "./levels.js";
 import { redactSensitiveText } from "./redact.js";
@@ -40,6 +40,6 @@ export function formatConsoleDiagnosticBlock(params: { level: LogLevel; message:
   const trailingNewline = params.message.endsWith("\n") ? "\n" : "";
   return `${formatJsonConsoleLine({
     level: params.level,
-    message: stripAnsi(params.message).trimEnd(),
+    message: stripVTControlCharacters(params.message).trimEnd(),
   })}${trailingNewline}`;
 }

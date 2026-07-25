@@ -1,6 +1,7 @@
 // Respawns the CLI with adjusted process flags when startup requires it.
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
+import { format } from "node:util";
 import { resolveNodeStartupTlsEnvironment } from "./bootstrap/node-startup-env.js";
 import {
   isTerminalInteractiveRespawnArgv,
@@ -9,6 +10,7 @@ import {
 } from "./cli/respawn-policy.js";
 import { normalizeWindowsArgv } from "./cli/windows-argv.js";
 import { isTruthyEnvValue } from "./infra/env.js";
+import { formatConsoleDiagnosticBlock } from "./logging/json-console-line.js";
 import { attachChildProcessBridge } from "./process/child-process-bridge.js";
 import {
   runRespawnChildWithSignalBridge,
@@ -164,7 +166,12 @@ export function runCliRespawnPlan(
     spawn,
     attachChildProcessBridge,
     exit: process.exit.bind(process) as (code?: number) => never,
-    writeError: (message, error) => console.error(message, error),
+    writeError: (message, error) => {
+      const formatted = format(message, error);
+      process.stderr.write(
+        formatConsoleDiagnosticBlock({ level: "error", message: `${formatted}\n` }),
+      );
+    },
   },
 ): ChildProcess {
   return runRespawnChildWithSignalBridge({

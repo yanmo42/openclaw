@@ -31,6 +31,7 @@ async function createHelpProcessFixture(config?: Record<string, unknown>) {
   const tlsImportGuardPath = path.join(root, "forbid-tls-import.mjs");
   const keepAlivePath = path.join(root, "keep-alive.mjs");
   const forceExitPath = path.join(root, "force-exit.mjs");
+  const unsupportedRuntimePath = path.join(root, "unsupported-runtime.mjs");
   await fs.mkdir(stateDir, { recursive: true });
   const profileConfigPath = path.join(root, ".openclaw-work", "openclaw.json");
   await fs.mkdir(path.dirname(profileConfigPath), { recursive: true });
@@ -57,7 +58,19 @@ registerHooks({
     forceExitPath,
     "setTimeout(() => process.exit(typeof process.exitCode === 'number' ? process.exitCode : 0), Number(process.env.OPENCLAW_TEST_FORCE_EXIT_MS));\n",
   );
-  return { root, stateDir, configPath, tlsImportGuardPath, keepAlivePath, forceExitPath };
+  await fs.writeFile(
+    unsupportedRuntimePath,
+    'Object.defineProperty(process.versions, "node", { value: "22.0.0" });\n',
+  );
+  return {
+    root,
+    stateDir,
+    configPath,
+    tlsImportGuardPath,
+    keepAlivePath,
+    forceExitPath,
+    unsupportedRuntimePath,
+  };
 }
 
 async function runCliProcess(params: {
@@ -68,6 +81,7 @@ async function runCliProcess(params: {
   forbidTlsImport?: boolean;
   keepAlive?: boolean;
   forceExitMs?: number;
+  unsupportedRuntime?: boolean;
 }) {
   const fixture = await createHelpProcessFixture(params.config);
   return await execFileAsync(
@@ -78,6 +92,9 @@ async function runCliProcess(params: {
         : []),
       ...(params.keepAlive ? ["--import", pathToFileURL(fixture.keepAlivePath).href] : []),
       ...(params.forceExitMs ? ["--import", pathToFileURL(fixture.forceExitPath).href] : []),
+      ...(params.unsupportedRuntime
+        ? ["--import", pathToFileURL(fixture.unsupportedRuntimePath).href]
+        : []),
       "--import",
       "tsx",
       "src/entry.ts",
@@ -408,6 +425,35 @@ describe("JSON console style process output", () => {
       ]),
     );
   });
+
+  it.each([
+    { name: "default config", args: ["status"], useDefaultConfigPaths: false },
+    { name: "named profile", args: ["--profile", "work", "status"], useDefaultConfigPaths: true },
+  ])(
+    "structures unsupported-runtime diagnostics from $name",
+    async ({ args, useDefaultConfigPaths }) => {
+      let failure: CliProcessFailure | undefined;
+      try {
+        await runCliProcess({
+          args,
+          config: loggingConfig,
+          unsupportedRuntime: true,
+          useDefaultConfigPaths,
+        });
+      } catch (error) {
+        failure = error as CliProcessFailure;
+      }
+
+      expect(failure?.code).toBe(1);
+      expect(failure?.stdout ?? "").toBe("");
+      expect(parseJsonLines(failure?.stderr ?? "")).toEqual([
+        expect.objectContaining({
+          level: "error",
+          message: expect.stringContaining("Detected: node 22.0.0"),
+        }),
+      ]);
+    },
+  );
 
   it("structures gateway startup tracing", async () => {
     const result = await runCliProcess({
