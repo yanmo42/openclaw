@@ -24,9 +24,6 @@ export function shouldSkipMutatingLoggingConfigRead(argv: string[] = process.arg
 
 /** Reads the logging block from config, caching by resolved config path. */
 export function readLoggingConfig(): LoggingConfig | undefined {
-  if (shouldSkipMutatingLoggingConfigRead()) {
-    return undefined;
-  }
   try {
     const configPath = resolveConfigPath();
     if (cachedLoggingConfig?.path === configPath) {

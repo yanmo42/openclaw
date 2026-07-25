@@ -523,6 +523,33 @@ describe("JSON console style process output", () => {
     );
   });
 
+  it.each(["schema", "validate"])(
+    "structures config %s Commander validation without loading mutable config",
+    async (command) => {
+      let failure: CliProcessFailure | undefined;
+      try {
+        await runCliProcess({
+          args: ["config", command, "--definitely-invalid"],
+          config: loggingConfig,
+          env: { OPENCLAW_DISABLE_ROUTE_FIRST: "1" },
+        });
+      } catch (error) {
+        failure = error as CliProcessFailure;
+      }
+
+      expect(failure?.code).toBe(1);
+      expect(failure?.stdout ?? "").toBe("");
+      expect(parseJsonLines(failure?.stderr ?? "")).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            level: "error",
+            message: expect.stringContaining("does not recognize option"),
+          }),
+        ]),
+      );
+    },
+  );
+
   it("structures required debug-proxy coverage diagnostics", async () => {
     const result = await runCliProcess({
       args: ["onboard", "recommendations", "--json"],
