@@ -1,4 +1,5 @@
 import { parseStrictPositiveInteger } from "openclaw/plugin-sdk/number-runtime";
+import { defaultRuntime } from "openclaw/plugin-sdk/runtime";
 import type { OpenClawPluginApi } from "./api.js";
 import type { Embeddings } from "./embeddings.js";
 import {
@@ -124,7 +125,7 @@ export function registerMemoryCli(
           const entries = await db.list(agentId, limit, {
             orderByCreatedAt: Boolean(opts.orderByCreatedAt),
           });
-          console.log(JSON.stringify(entries, null, 2));
+          defaultRuntime.writeJson(entries);
         });
 
       memory
@@ -145,7 +146,7 @@ export function registerMemoryCli(
             importance: r.entry.importance,
             score: r.score,
           }));
-          console.log(JSON.stringify(output, null, 2));
+          defaultRuntime.writeJson(output);
         });
 
       memory
@@ -189,7 +190,7 @@ export function registerMemoryCli(
               }
             }
           }
-          console.log(JSON.stringify(rows, null, 2));
+          defaultRuntime.writeJson(rows);
         });
 
       memory
