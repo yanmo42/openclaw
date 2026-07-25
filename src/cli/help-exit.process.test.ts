@@ -307,4 +307,37 @@ describe("JSON console style process output", () => {
     expect(result.stdout).toContain("Usage: openclaw [options] [command]");
     expect(() => parseJsonLines(result.stdout)).toThrow();
   });
+
+  it.each([
+    {
+      name: "missing container value",
+      args: ["--container"],
+      message: "--container requires a value",
+    },
+    {
+      name: "missing profile value",
+      args: ["--profile"],
+      message: "--profile requires a value",
+    },
+    {
+      name: "container/profile conflict",
+      args: ["--container", "demo", "--profile", "work", "status"],
+      message: "--container cannot be combined with --profile/--dev",
+    },
+  ])("structures entry validation for $name", async ({ args, message }) => {
+    let failure: CliProcessFailure | undefined;
+    try {
+      await runCliProcess({ args, config: loggingConfig });
+    } catch (error) {
+      failure = error as CliProcessFailure;
+    }
+
+    expect(failure?.code).toBe(2);
+    expect(failure?.stdout ?? "").toBe("");
+    expect(parseJsonLines(failure?.stderr ?? "")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ level: "error", message: expect.stringContaining(message) }),
+      ]),
+    );
+  });
 });
