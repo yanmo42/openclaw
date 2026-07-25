@@ -1,6 +1,7 @@
 // Handles fast version output before the full CLI graph loads.
 import { isRootVersionInvocation } from "./cli/argv.js";
 import { resolveCliContainerTarget } from "./cli/container-target.js";
+import { formatConsoleDiagnosticBlock } from "./logging/json-console-line.js";
 
 export function tryHandleRootVersionFastPath(
   argv: string[],
@@ -27,9 +28,12 @@ export function tryHandleRootVersionFastPath(
   const onError =
     deps.onError ??
     ((error: unknown) => {
-      console.error(
-        "[openclaw] Failed to resolve version:",
-        error instanceof Error ? (error.stack ?? error.message) : error,
+      const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
+      process.stderr.write(
+        formatConsoleDiagnosticBlock({
+          level: "error",
+          message: `[openclaw] Failed to resolve version: ${detail}\n`,
+        }),
       );
       exit(1);
     });
