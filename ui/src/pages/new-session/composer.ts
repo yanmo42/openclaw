@@ -1,4 +1,5 @@
 import { html, nothing, type TemplateResult } from "lit";
+import { ref } from "lit/directives/ref.js";
 import { icons } from "../../components/icons.ts";
 import "../../components/tooltip.ts";
 import { t } from "../../i18n/index.ts";
@@ -12,6 +13,12 @@ import {
   renderChatAttachmentInputs,
   renderChatAttachmentMenu,
 } from "../chat/components/chat-attachments.ts";
+import {
+  adjustTextareaHeight,
+  disconnectTextareaOverflowObserver,
+  observeTextareaOverflow,
+  scheduleTextareaHeightAdjustment,
+} from "../chat/components/chat-composer-dom.ts";
 import type { NewSessionAttachmentDraft } from "./attachment-draft.ts";
 import type { NewSessionModelControl } from "./model-control.ts";
 
@@ -25,6 +32,7 @@ type NewSessionComposerOptions = {
   readSignal: AbortSignal;
   requiresModifier: boolean;
   submitting: boolean;
+  textareaController: NewSessionComposerTextareaController;
   messageLocked?: boolean;
   incognito?: boolean;
   onAttachmentsChange: (attachments: ChatAttachment[]) => void;
@@ -33,6 +41,37 @@ type NewSessionComposerOptions = {
   onToggleIncognito?: () => void;
   onSubmit: () => void;
 };
+
+export class NewSessionComposerTextareaController {
+  private textarea: HTMLTextAreaElement | null = null;
+
+  readonly ref = (element?: Element) => {
+    const nextTextarea = element instanceof HTMLTextAreaElement ? element : null;
+    if (this.textarea && this.textarea !== nextTextarea) {
+      disconnectTextareaOverflowObserver(this.textarea);
+    }
+    this.textarea = nextTextarea;
+    if (nextTextarea) {
+      observeTextareaOverflow(nextTextarea);
+      scheduleTextareaHeightAdjustment(nextTextarea);
+    }
+  };
+
+  syncDraft(message: string) {
+    // The stable ref measures attachment only. Programmatic restores and
+    // resets still need a post-render measurement after Lit commits .value.
+    if (this.textarea?.isConnected && this.textarea.value !== message) {
+      scheduleTextareaHeightAdjustment(this.textarea);
+    }
+  }
+
+  disconnect() {
+    if (this.textarea) {
+      disconnectTextareaOverflowObserver(this.textarea);
+      this.textarea = null;
+    }
+  }
+}
 
 export function renderDraftError(message: string) {
   return html`
@@ -74,6 +113,7 @@ function renderNewSessionComposer(options: NewSessionComposerOptions) {
     readSignal: options.readSignal,
   };
   const enabled = !options.submitting && !options.messageLocked;
+  options.textareaController.syncDraft(options.message);
   // Nested dragenter/dragleave events must stay balanced so crossing composer
   // children does not flicker the file drop affordance.
   let attachmentDragDepth = 0;
@@ -142,13 +182,17 @@ function renderNewSessionComposer(options: NewSessionComposerOptions) {
           ${renderChatAttachmentMenu(attachmentProps)}
           <div class="agent-chat__composer-combobox">
             <textarea
+              ${ref(options.textareaController.ref)}
               class="new-session-page__message"
               rows="1"
               ?disabled=${options.submitting || options.messageLocked}
               placeholder=${t("newSession.messagePlaceholder")}
               .value=${options.message}
-              @input=${(event: Event) =>
-                options.onInput((event.target as HTMLTextAreaElement).value)}
+              @input=${(event: Event) => {
+                const target = event.target as HTMLTextAreaElement;
+                adjustTextareaHeight(target);
+                options.onInput(target.value);
+              }}
               @keydown=${(event: KeyboardEvent) => handleComposerKeydown(event, options)}
               @paste=${(event: ClipboardEvent) => {
                 if (!options.submitting && !options.messageLocked) {
@@ -211,6 +255,7 @@ export function renderNewSessionDraftComposer(options: {
   message: string;
   incognito?: boolean;
   modelControl: NewSessionModelControl;
+  textareaController: NewSessionComposerTextareaController;
   requiresModifier: boolean;
   submitting: boolean;
   messageLocked?: boolean;
@@ -237,6 +282,7 @@ export function renderNewSessionDraftComposer(options: {
     readSignal,
     requiresModifier: options.requiresModifier,
     submitting: options.submitting,
+    textareaController: options.textareaController,
     messageLocked: options.messageLocked,
     onAttachmentsChange: (attachments) => {
       if (!options.submitting && !options.messageLocked) {
