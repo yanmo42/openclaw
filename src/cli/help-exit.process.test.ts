@@ -31,10 +31,13 @@ async function createHelpProcessFixture(config?: Record<string, unknown>) {
   const tlsImportGuardPath = path.join(root, "forbid-tls-import.mjs");
   const keepAlivePath = path.join(root, "keep-alive.mjs");
   await fs.mkdir(stateDir, { recursive: true });
+  const profileConfigPath = path.join(root, ".openclaw-work", "openclaw.json");
+  await fs.mkdir(path.dirname(profileConfigPath), { recursive: true });
   await fs.writeFile(
     configPath,
     JSON.stringify(config ?? { plugins: { entries: { "oc-path": { enabled: true } } } }),
   );
+  await fs.writeFile(profileConfigPath, JSON.stringify(config ?? {}));
   await fs.writeFile(
     tlsImportGuardPath,
     `import { registerHooks } from "node:module";
@@ -56,6 +59,7 @@ async function runCliProcess(params: {
   args: string[];
   config?: Record<string, unknown>;
   env?: NodeJS.ProcessEnv;
+  useDefaultConfigPaths?: boolean;
   forbidTlsImport?: boolean;
   keepAlive?: boolean;
 }) {
@@ -81,9 +85,9 @@ async function runCliProcess(params: {
         NODE_ENV: undefined,
         NODE_OPTIONS: undefined,
         NODE_USE_SYSTEM_CA: "1",
-        OPENCLAW_CONFIG_PATH: fixture.configPath,
+        OPENCLAW_CONFIG_PATH: params.useDefaultConfigPaths ? undefined : fixture.configPath,
         OPENCLAW_NO_RESPAWN: "1",
-        OPENCLAW_STATE_DIR: fixture.stateDir,
+        OPENCLAW_STATE_DIR: params.useDefaultConfigPaths ? undefined : fixture.stateDir,
         VITEST: undefined,
         ...params.env,
       },
@@ -337,6 +341,29 @@ describe("JSON console style process output", () => {
     expect(parseJsonLines(failure?.stderr ?? "")).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ level: "error", message: expect.stringContaining(message) }),
+      ]),
+    );
+  });
+
+  it("uses named-profile logging style for entry validation", async () => {
+    let failure: CliProcessFailure | undefined;
+    try {
+      await runCliProcess({
+        args: ["--profile", "work", "--container", "demo", "status"],
+        config: loggingConfig,
+        useDefaultConfigPaths: true,
+      });
+    } catch (error) {
+      failure = error as CliProcessFailure;
+    }
+
+    expect(failure?.code).toBe(2);
+    expect(parseJsonLines(failure?.stderr ?? "")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          level: "error",
+          message: expect.stringContaining("--container cannot be combined with --profile/--dev"),
+        }),
       ]),
     );
   });

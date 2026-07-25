@@ -26,6 +26,7 @@ import {
 } from "../infra/tmp-openclaw-dir.js";
 import { readLoggingConfig, shouldSkipMutatingLoggingConfigRead } from "./config.js";
 import { resolveEnvLogLevelOverride } from "./env-log-level.js";
+import { formatConsoleDiagnosticLine } from "./json-console-line.js";
 import { type LogLevel, levelToMinLevel, normalizeLogLevel } from "./levels.js";
 import { isLegacyRollingLogFilePath, resolveRollingLogFilePathForDate } from "./log-file-path.js";
 import { resolveDefaultRollingLogFile } from "./log-file-path.js";
@@ -643,9 +644,8 @@ function buildLogger(settings: ResolvedRuntimeSettings): TsLogger<LogObj> {
           warnedAboutRotationFailure = false;
         } else if (!warnedAboutRotationFailure) {
           warnedAboutRotationFailure = true;
-          process.stderr.write(
-            `[openclaw] log file rotation failed; continuing writes file=${activeFile} maxFileBytes=${settings.maxFileBytes}\n`,
-          );
+          const message = `[openclaw] log file rotation failed; continuing writes file=${activeFile} maxFileBytes=${settings.maxFileBytes}`;
+          process.stderr.write(`${formatConsoleDiagnosticLine({ level: "warn", message })}\n`);
         }
       }
       if (appendLogLine(activeFile, payload)) {

@@ -121,15 +121,14 @@ if (
       }
 
       const containerTargetName = resolveCliContainerTarget(process.argv);
-      if (containerTargetName && parsed.profile) {
-        await writeCapturedCliArgumentError("--container cannot be combined with --profile/--dev");
-        process.exit(2);
-      }
-
       if (parsed.profile) {
         applyCliProfileEnv({ profile: parsed.profile });
         // Keep Commander and ad-hoc argv checks consistent.
         process.argv = parsed.argv;
+      }
+      if (containerTargetName && parsed.profile) {
+        await writeCapturedCliArgumentError("--container cannot be combined with --profile/--dev");
+        process.exit(2);
       }
       gatewayEntryStartupTrace.mark("argv");
 
