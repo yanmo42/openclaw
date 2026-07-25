@@ -3,11 +3,14 @@ import process from "node:process";
 import { isTruthyEnvValue } from "../infra/env.js";
 
 type GatewayStartupTraceSource = "entry" | "cli.main";
+type GatewayStartupTraceLineFormatter = (message: string) => string;
 
 export function createGatewayStartupTrace(
   argv: string[],
   source: GatewayStartupTraceSource,
 ): {
+  enabled: boolean;
+  setLineFormatter(formatter: GatewayStartupTraceLineFormatter): void;
   mark(name: string): void;
   measure<T>(name: string, run: () => T | PromiseLike<T>): Promise<T>;
 } {
@@ -16,15 +19,33 @@ export function createGatewayStartupTrace(
     argv.slice(2).includes("gateway");
   const started = performance.now();
   let last = started;
+  let lineFormatter: GatewayStartupTraceLineFormatter | null = null;
+  let pendingMessages: string[] = [];
+  const writeMessage = (message: string) => {
+    if (!lineFormatter) {
+      pendingMessages.push(message);
+      return;
+    }
+    process.stderr.write(`${lineFormatter(message)}\n`);
+  };
   const emit = (name: string, durationMs: number, totalMs: number) => {
     if (!enabled) {
       return;
     }
-    process.stderr.write(
-      `[gateway] startup trace: ${source}.${name} ${durationMs.toFixed(1)}ms total=${totalMs.toFixed(1)}ms\n`,
+    writeMessage(
+      `[gateway] startup trace: ${source}.${name} ${durationMs.toFixed(1)}ms total=${totalMs.toFixed(1)}ms`,
     );
   };
   return {
+    enabled,
+    setLineFormatter(formatter) {
+      lineFormatter = formatter;
+      const queued = pendingMessages;
+      pendingMessages = [];
+      for (const message of queued) {
+        writeMessage(message);
+      }
+    },
     mark(name: string) {
       const now = performance.now();
       emit(name, now - last, now - started);
@@ -41,4 +62,14 @@ export function createGatewayStartupTrace(
       }
     },
   };
+}
+
+export async function configureGatewayStartupTraceConsoleFormatting(
+  trace: ReturnType<typeof createGatewayStartupTrace>,
+): Promise<void> {
+  if (!trace.enabled) {
+    return;
+  }
+  const { formatConsoleDiagnosticLine } = await import("../logging/json-console-line.js");
+  trace.setLineFormatter((message) => formatConsoleDiagnosticLine({ level: "info", message }));
 }

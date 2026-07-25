@@ -51,7 +51,10 @@ import {
   shouldUseSetupOnboardConfigureHelpFastPath,
 } from "./run-main-policy.js";
 import { registerSignalExitBarrier, waitForSignalExitBarriers } from "./signal-exit-barrier.js";
-import { createGatewayStartupTrace } from "./startup-trace.js";
+import {
+  configureGatewayStartupTraceConsoleFormatting,
+  createGatewayStartupTrace,
+} from "./startup-trace.js";
 import { normalizeWindowsArgv } from "./windows-argv.js";
 
 export {
@@ -963,6 +966,11 @@ async function bootstrapCliProxyCaptureAndDispatcher(
 export async function runCli(argv: string[] = process.argv) {
   const originalArgv = normalizeWindowsArgv(argv);
   const startupTrace = createGatewayStartupTrace(originalArgv, "cli.main");
+  const earlyProfile = parseCliProfileArgs(originalArgv);
+  if (earlyProfile.ok && earlyProfile.profile) {
+    applyCliProfileEnv({ profile: earlyProfile.profile });
+  }
+  await configureGatewayStartupTraceConsoleFormatting(startupTrace);
   const originalInvocation = resolveCliArgvInvocation(originalArgv);
   let consoleCaptureInstalled = false;
   const installConsoleCapture = async () => {

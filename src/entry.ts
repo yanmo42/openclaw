@@ -12,7 +12,10 @@ import {
 } from "./cli/precomputed-help.js";
 import { applyCliProfileEnv, parseCliProfileArgs } from "./cli/profile.js";
 import type { RootHelpRenderOptions } from "./cli/program/root-help.js";
-import { createGatewayStartupTrace } from "./cli/startup-trace.js";
+import {
+  configureGatewayStartupTraceConsoleFormatting,
+  createGatewayStartupTrace,
+} from "./cli/startup-trace.js";
 import { normalizeWindowsArgv } from "./cli/windows-argv.js";
 import {
   enableOpenClawCompileCache,
@@ -107,6 +110,11 @@ if (
     process.argv = normalizeWindowsArgv(process.argv);
 
     if (!ensureCliRespawnReady()) {
+      const earlyProfile = parseCliProfileArgs(process.argv);
+      if (earlyProfile.ok && earlyProfile.profile) {
+        applyCliProfileEnv({ profile: earlyProfile.profile });
+      }
+      await configureGatewayStartupTraceConsoleFormatting(gatewayEntryStartupTrace);
       const parsedContainer = parseCliContainerArgs(process.argv);
       if (!parsedContainer.ok) {
         await writeCapturedCliArgumentError(parsedContainer.error);

@@ -367,4 +367,45 @@ describe("JSON console style process output", () => {
       ]),
     );
   });
+
+  it("uses named-profile logging style when container parsing fails", async () => {
+    let failure: CliProcessFailure | undefined;
+    try {
+      await runCliProcess({
+        args: ["--profile", "work", "--container"],
+        config: loggingConfig,
+        useDefaultConfigPaths: true,
+      });
+    } catch (error) {
+      failure = error as CliProcessFailure;
+    }
+
+    expect(failure?.code).toBe(2);
+    expect(parseJsonLines(failure?.stderr ?? "")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          level: "error",
+          message: expect.stringContaining("--container requires a value"),
+        }),
+      ]),
+    );
+  });
+
+  it("structures gateway startup tracing", async () => {
+    const result = await runCliProcess({
+      args: ["gateway", "status"],
+      config: loggingConfig,
+      env: { OPENCLAW_GATEWAY_STARTUP_TRACE: "1" },
+    });
+
+    const records = parseJsonLines(result.stderr);
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          level: "info",
+          message: expect.stringContaining("[gateway] startup trace:"),
+        }),
+      ]),
+    );
+  });
 });
